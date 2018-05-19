@@ -11,6 +11,7 @@
  */
 
 #include <linux/kernel.h>
+#include <linux/vmalloc.h>
 #include "cam_sensor_util.h"
 #include <cam_mem_mgr.h>
 #include "cam_res_mgr_api.h"
@@ -36,13 +37,26 @@ static struct i2c_settings_list*
 	else
 		return NULL;
 
-	tmp->i2c_settings.reg_setting = (struct cam_sensor_i2c_reg_array *)
-		kzalloc(sizeof(struct cam_sensor_i2c_reg_array) *
-		size, GFP_KERNEL);
-	if (tmp->i2c_settings.reg_setting == NULL) {
-		list_del(&(tmp->list));
-		kfree(tmp);
-		return NULL;
+	if ((sizeof(struct cam_sensor_i2c_reg_array) * size) < PAGE_SIZE) {
+		tmp->i2c_settings.reg_setting =
+			(struct cam_sensor_i2c_reg_array *)
+			kzalloc(sizeof(struct cam_sensor_i2c_reg_array) *
+			size, GFP_KERNEL);
+		if (tmp->i2c_settings.reg_setting == NULL) {
+			list_del(&(tmp->list));
+			kfree(tmp);
+			return NULL;
+		}
+	} else {
+		tmp->i2c_settings.reg_setting =
+			(struct cam_sensor_i2c_reg_array *)
+			vzalloc(sizeof(struct cam_sensor_i2c_reg_array) *
+				size);
+		if (tmp->i2c_settings.reg_setting == NULL) {
+			list_del(&(tmp->list));
+			kfree(tmp);
+			return NULL;
+		}
 	}
 	tmp->i2c_settings.size = size;
 
@@ -61,7 +75,14 @@ int32_t delete_request(struct i2c_settings_array *i2c_array)
 
 	list_for_each_entry_safe(i2c_list, i2c_next,
 		&(i2c_array->list_head), list) {
-		kfree(i2c_list->i2c_settings.reg_setting);
+
+		if ((sizeof(struct cam_sensor_i2c_reg_array) *
+			i2c_list->i2c_settings.size) < PAGE_SIZE) {
+			kfree(i2c_list->i2c_settings.reg_setting);
+		} else {
+			vfree(i2c_list->i2c_settings.reg_setting);
+		}
+
 		list_del(&(i2c_list->list));
 		kfree(i2c_list);
 	}
@@ -128,7 +149,7 @@ int32_t cam_sensor_handle_poll(
 		CAM_ERR(CAM_SENSOR, "Failed in allocating mem for list");
 		return -ENOMEM;
 	}
-
+	(*offset) = 0;//add by HHK fox fix delayus invalid 
 	i2c_list->op_code = CAM_SENSOR_I2C_POLL;
 	i2c_list->i2c_settings.data_type =
 		cond_wait->data_type;
@@ -176,7 +197,7 @@ int32_t cam_sensor_handle_random_write(
 		cam_cmd_i2c_random_wr->header.addr_type;
 	i2c_list->i2c_settings.data_type =
 		cam_cmd_i2c_random_wr->header.data_type;
-
+	(*offset) = 0;//add by HHK fox fix delayus invalid 
 	for (cnt = 0; cnt < (cam_cmd_i2c_random_wr->header.count);
 		cnt++) {
 		i2c_list->i2c_settings.reg_setting[cnt].reg_addr =
@@ -227,7 +248,7 @@ static int32_t cam_sensor_handle_continuous_write(
 		cam_cmd_i2c_continuous_wr->header.data_type;
 	i2c_list->i2c_settings.size =
 		cam_cmd_i2c_continuous_wr->header.count;
-
+	(*offset) = 0;//add by HHK fox fix delayus invalid 
 	for (cnt = 0; cnt < (cam_cmd_i2c_continuous_wr->header.count);
 		cnt++) {
 		i2c_list->i2c_settings.reg_setting[cnt].reg_addr =

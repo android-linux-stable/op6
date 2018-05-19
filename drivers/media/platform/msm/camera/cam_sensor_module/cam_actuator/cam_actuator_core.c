@@ -405,9 +405,11 @@ int32_t cam_actuator_i2c_pkt_parse(struct cam_actuator_ctrl_t *a_ctrl,
 	power_info = &soc_private->power_info;
 
 	ioctl_ctrl = (struct cam_control *)arg;
+
 	if (copy_from_user(&config, (void __user *) ioctl_ctrl->handle,
 		sizeof(config)))
 		return -EFAULT;
+
 	rc = cam_mem_get_cpu_buf(config.packet_handle,
 		(uint64_t *)&generic_ptr, &len_of_buff);
 	if (rc < 0) {
@@ -666,6 +668,7 @@ int32_t cam_actuator_driver_cmd(struct cam_actuator_ctrl_t *a_ctrl,
 			rc = -EINVAL;
 			goto release_mutex;
 		}
+
 		rc = copy_from_user(&actuator_acq_dev,
 			(void __user *) cmd->handle,
 			sizeof(actuator_acq_dev));

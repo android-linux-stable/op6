@@ -193,7 +193,7 @@ static int xhci_plat_probe(struct platform_device *pdev)
 {
 	const struct of_device_id *match;
 	const struct hc_driver	*driver;
-	struct device		*sysdev, *phydev;
+	struct device		*sysdev = NULL, *phydev = NULL;// add PATCH:for hcd->usb_phy null issue
 	struct xhci_hcd		*xhci;
 	struct resource         *res;
 	struct usb_hcd		*hcd;
@@ -220,9 +220,10 @@ static int xhci_plat_probe(struct platform_device *pdev)
 	 * 3. xhci_plat is grandchild of a pci device (dwc3-pci)
 	 */
 	sysdev = &pdev->dev;
+	/*2018/01/16 bsp@infi add PATCH:for hcd->usb_phy null issue*/
 	phydev = &pdev->dev;
-	if (sysdev->parent && !sysdev->of_node && sysdev->parent->of_node)
-		phydev = sysdev->parent;
+	if(sysdev->parent && !sysdev->of_node && sysdev->parent->of_node)
+		phydev =sysdev->parent;
 	/*
 	 * If sysdev->parent->parent is available and part of IOMMU group
 	 * (indicating possible usage of SMMU enablement), then use
@@ -329,7 +330,8 @@ static int xhci_plat_probe(struct platform_device *pdev)
 
 	if (device_property_read_u32(&pdev->dev, "usb-core-id", &xhci->core_id))
 		xhci->core_id = -EINVAL;
-
+	/*2018/01/16 bsp@infi add PATCH:for hcd->usb_phy null issue*/
+	//hcd->usb_phy = devm_usb_get_phy_by_phandle(sysdev, "usb-phy", 0);
 	hcd->usb_phy = devm_usb_get_phy_by_phandle(phydev, "usb-phy", 0);
 	if (IS_ERR(hcd->usb_phy)) {
 		ret = PTR_ERR(hcd->usb_phy);

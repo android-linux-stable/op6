@@ -303,7 +303,6 @@ static int32_t cam_icp_deinit_idle_clk(void *priv, void *data)
 	clk_info->base_clk = 0;
 	clk_info->curr_clk = 0;
 	clk_info->over_clked = 0;
-
 	mutex_lock(&hw_mgr->hw_mgr_mutex);
 
 	for (i = 0; i < CAM_ICP_CTX_MAX; i++) {
@@ -322,7 +321,6 @@ static int32_t cam_icp_deinit_idle_clk(void *priv, void *data)
 		}
 		mutex_unlock(&ctx_data->ctx_mutex);
 	}
-
 	if (busy) {
 		cam_icp_device_timer_reset(hw_mgr, clk_info->hw_type);
 		rc = -EBUSY;
@@ -361,8 +359,8 @@ static int32_t cam_icp_deinit_idle_clk(void *priv, void *data)
 				sizeof(struct cam_a5_clk_update_cmd));
 
 done:
-	mutex_unlock(&hw_mgr->hw_mgr_mutex);
-	return rc;
+		mutex_unlock(&hw_mgr->hw_mgr_mutex);
+		return rc;
 }
 
 static int32_t cam_icp_ctx_timer(void *priv, void *data)
@@ -392,7 +390,6 @@ static int32_t cam_icp_ctx_timer(void *priv, void *data)
 		mutex_unlock(&ctx_data->ctx_mutex);
 		return 0;
 	}
-
 	if (cam_icp_frame_pending(ctx_data)) {
 		cam_icp_ctx_timer_reset(ctx_data);
 		mutex_unlock(&ctx_data->ctx_mutex);
@@ -440,8 +437,8 @@ static int32_t cam_icp_ctx_timer(void *priv, void *data)
 	ctx_data->clk_info.base_clk = 0;
 
 	clk_update.ahb_vote.type = CAM_VOTE_DYNAMIC;
-	clk_update.ahb_vote.vote.freq = 0;
-	clk_update.ahb_vote_valid = false;
+	clk_update.ahb_vote.vote.freq = clk_info->curr_clk;
+	clk_update.ahb_vote_valid = true;
 	clk_update.axi_vote.compressed_bw = clk_info->compressed_bw;
 	clk_update.axi_vote.uncompressed_bw = clk_info->uncompressed_bw;
 	clk_update.axi_vote_valid = true;
@@ -1042,8 +1039,8 @@ static int cam_icp_update_cpas_vote(struct cam_icp_hw_mgr *hw_mgr,
 	}
 
 	clk_update.ahb_vote.type = CAM_VOTE_DYNAMIC;
-	clk_update.ahb_vote.vote.freq = 0;
-	clk_update.ahb_vote_valid = false;
+	clk_update.ahb_vote.vote.freq = clk_info->curr_clk;
+	clk_update.ahb_vote_valid = true;
 	clk_update.axi_vote.compressed_bw = clk_info->compressed_bw;
 	clk_update.axi_vote.uncompressed_bw = clk_info->uncompressed_bw;
 	clk_update.axi_vote_valid = true;
@@ -2285,7 +2282,13 @@ static int cam_icp_mgr_abort_handle(
 	unsigned long rem_jiffies;
 	size_t packet_size;
 	int timeout = 100;
+	struct hfi_cmd_work_data *task_data;
 	struct hfi_cmd_ipebps_async *abort_cmd;
+	struct crm_workq_task *task;
+
+	task = cam_req_mgr_workq_get_task(icp_hw_mgr.cmd_work);
+	if (!task)
+		return -ENOMEM;
 
 	packet_size =
 		sizeof(struct hfi_cmd_ipebps_async) +
@@ -2311,7 +2314,13 @@ static int cam_icp_mgr_abort_handle(
 	abort_cmd->user_data1 = (uint64_t)ctx_data;
 	abort_cmd->user_data2 = (uint64_t)0x0;
 
-	rc = hfi_write_cmd(abort_cmd);
+	task_data = (struct hfi_cmd_work_data *)task->payload;
+	task_data->data = (void *)abort_cmd;
+	task_data->request_id = 0;
+	task_data->type = ICP_WORKQ_TASK_CMD_TYPE;
+	task->process_cb = cam_icp_mgr_process_cmd;
+	rc = cam_req_mgr_workq_enqueue_task(task, &icp_hw_mgr,
+		CRM_TASK_PRIORITY_0);
 	if (rc) {
 		kfree(abort_cmd);
 		return rc;
@@ -2324,8 +2333,12 @@ static int cam_icp_mgr_abort_handle(
 		rc = -ETIMEDOUT;
 		CAM_ERR(CAM_ICP, "FW timeout/err in abort handle command");
 	}
+	else{
+		//workq won't do free,if no timeout means
+		//cmd execution finished,so just release it.
+		kfree(abort_cmd);
+	}
 
-	kfree(abort_cmd);
 	return rc;
 }
 
@@ -2336,7 +2349,13 @@ static int cam_icp_mgr_destroy_handle(
 	int timeout = 100;
 	unsigned long rem_jiffies;
 	size_t packet_size;
+	struct hfi_cmd_work_data *task_data;
 	struct hfi_cmd_ipebps_async *destroy_cmd;
+	struct crm_workq_task *task;
+
+	task = cam_req_mgr_workq_get_task(icp_hw_mgr.cmd_work);
+	if (!task)
+		return -ENOMEM;
 
 	packet_size =
 		sizeof(struct hfi_cmd_ipebps_async) +
@@ -2363,7 +2382,13 @@ static int cam_icp_mgr_destroy_handle(
 	memcpy(destroy_cmd->payload.direct, &ctx_data->temp_payload,
 		sizeof(uint64_t));
 
-	rc = hfi_write_cmd(destroy_cmd);
+	task_data = (struct hfi_cmd_work_data *)task->payload;
+	task_data->data = (void *)destroy_cmd;
+	task_data->request_id = 0;
+	task_data->type = ICP_WORKQ_TASK_CMD_TYPE;
+	task->process_cb = cam_icp_mgr_process_cmd;
+	rc = cam_req_mgr_workq_enqueue_task(task, &icp_hw_mgr,
+		CRM_TASK_PRIORITY_0);
 	if (rc) {
 		kfree(destroy_cmd);
 		return rc;
@@ -2380,7 +2405,12 @@ static int cam_icp_mgr_destroy_handle(
 			HFI_DEBUG_MODE_QUEUE)
 			cam_icp_mgr_process_dbg_buf();
 	}
-	kfree(destroy_cmd);
+	else{
+		//workq won't do free,if no timeout means
+		//cmd execution finished,so just release it.
+		kfree(destroy_cmd);
+	}
+
 	return rc;
 }
 

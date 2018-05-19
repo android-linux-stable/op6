@@ -29,7 +29,7 @@
 #include <linux/slab.h>
 #include <linux/tty.h>
 #include <linux/tty_flip.h>
-
+#include <linux/miscdevice.h>
 /* UART specific GENI registers */
 #define SE_UART_LOOPBACK_CFG		(0x22C)
 #define SE_UART_TX_TRANS_CFG		(0x25C)
@@ -126,6 +126,21 @@
 	if (ctx) \
 		ipc_log_string(ctx, x); \
 } while (0)
+
+
+/*zyh we use dynamic add console , so we can't use __init  __exit, this will cause can't find func*/
+#ifdef __init
+#undef __init
+#endif
+
+#ifdef __exit
+#undef __exit
+#endif
+
+#define __init
+#define __exit
+
+
 
 #define DMA_RX_BUF_SIZE		(2048)
 #define UART_CONSOLE_RX_WM	(2)
@@ -419,11 +434,6 @@ static unsigned int msm_geni_serial_get_mctrl(struct uart_port *uport)
 		mctrl |= TIOCM_CTS;
 
 	return mctrl;
-}
-
-static void msm_geni_cons_set_mctrl(struct uart_port *uport,
-							unsigned int mctrl)
-{
 }
 
 static void msm_geni_serial_set_mctrl(struct uart_port *uport,
@@ -2307,7 +2317,6 @@ static const struct uart_ops msm_geni_console_pops = {
 	.config_port = msm_geni_serial_config_port,
 	.shutdown = msm_geni_serial_shutdown,
 	.type = msm_geni_serial_get_type,
-	.set_mctrl = msm_geni_cons_set_mctrl,
 	.get_mctrl = msm_geni_cons_get_mctrl,
 #ifdef CONFIG_CONSOLE_POLL
 	.poll_get_char	= msm_geni_serial_get_char,
@@ -2335,13 +2344,36 @@ static const struct uart_ops msm_geni_serial_pops = {
 
 static const struct of_device_id msm_geni_device_tbl[] = {
 #if defined(CONFIG_SERIAL_CORE_CONSOLE) || defined(CONFIG_CONSOLE_POLL)
-	{ .compatible = "qcom,msm-geni-console",
-			.data = (void *)&msm_geni_console_driver},
+
+    { .compatible = "qcom,msm-geni-console-oem",
+		.data = (void *)&msm_geni_console_driver},
+
 #endif
 	{ .compatible = "qcom,msm-geni-serial-hs",
 			.data = (void *)&msm_geni_serial_hs_driver},
 	{},
 };
+
+struct oemconsole {
+	bool default_console;
+	bool console_initialized;
+};
+
+static struct oemconsole oem_console  = {
+	.default_console       = false,
+	.console_initialized   = false,
+};
+
+static int __init parse_console_config(char *str)
+{
+	if (str != NULL)
+		oem_console.default_console = true;
+	return 0;
+}
+early_param("console", parse_console_config);
+static int  msm_serial_oem_pinctrl_init(void);
+static int  oem_msm_geni_serial_init(void);
+
 
 static int msm_geni_serial_probe(struct platform_device *pdev)
 {
@@ -2560,6 +2592,7 @@ static int msm_geni_serial_runtime_suspend(struct device *dev)
 	struct platform_device *pdev = to_platform_device(dev);
 	struct msm_geni_serial_port *port = platform_get_drvdata(pdev);
 	int ret = 0;
+	u32 uart_manual_rfr = 0;
 	u32 geni_status = geni_read_reg_nolog(port->uport.membase,
 							SE_GENI_STATUS);
 
@@ -2571,6 +2604,23 @@ static int msm_geni_serial_runtime_suspend(struct device *dev)
 	 * Resources off
 	 */
 	disable_irq(port->uport.irq);
+	/*
+	 * If the clients haven't done a manual flow on/off then go ahead and
+	 * set this to manual flow on.
+	 */
+	if (!port->manual_flow) {
+		uart_manual_rfr |= (UART_MANUAL_RFR_EN | UART_RFR_READY);
+		geni_write_reg_nolog(uart_manual_rfr, port->uport.membase,
+							SE_UART_MANUAL_RFR);
+		/*
+		 * Ensure that the manual flow on writes go through before
+		 * doing a stop_rx else we could end up flowing off the peer.
+		 */
+		mb();
+		IPC_LOG_MSG(port->ipc_log_pwr, "%s: Manual Flow ON 0x%x\n",
+						 __func__, uart_manual_rfr);
+	}
+
 	stop_rx_sequencer(&port->uport);
 	geni_status = geni_read_reg_nolog(port->uport.membase, SE_GENI_STATUS);
 	if ((geni_status & M_GENI_CMD_ACTIVE))
@@ -2713,6 +2763,21 @@ static struct platform_driver msm_geni_serial_platform_driver = {
 	},
 };
 
+static const struct of_device_id msm_geni_serial_match_table_oem[] = {
+	{ .compatible = "qcom,msm-geni-uart-oem",},
+	{},
+};
+
+static struct platform_driver msm_geni_serial_platform_driver_oem = {
+	.remove = msm_geni_serial_remove,
+	.probe = msm_geni_serial_probe,
+	.driver = {
+		.name = "msm_geni_serial_oem",
+		.of_match_table = msm_geni_serial_match_table_oem,
+		.pm = &msm_geni_serial_pm_ops,
+	},
+};
+
 
 static struct uart_driver msm_geni_serial_hs_driver = {
 	.owner = THIS_MODULE,
@@ -2740,9 +2805,6 @@ static int __init msm_geni_serial_init(void)
 		msm_geni_console_port.uport.line = i;
 	}
 
-	ret = console_register(&msm_geni_console_driver);
-	if (ret)
-		return ret;
 
 	ret = uart_register_driver(&msm_geni_serial_hs_driver);
 	if (ret) {
@@ -2756,8 +2818,13 @@ static int __init msm_geni_serial_init(void)
 		uart_unregister_driver(&msm_geni_serial_hs_driver);
 		return ret;
 	}
-
 	pr_info("%s: Driver initialized", __func__);
+
+    if(oem_console.default_console == 1)
+   		 oem_msm_geni_serial_init();
+    else
+		 msm_serial_oem_pinctrl_init();
+
 	return ret;
 }
 module_init(msm_geni_serial_init);
@@ -2769,6 +2836,113 @@ static void __exit msm_geni_serial_exit(void)
 	console_unregister(&msm_geni_console_driver);
 }
 module_exit(msm_geni_serial_exit);
+
+
+static int oem_msm_geni_serial_init(void)
+{
+	int ret = 0;
+
+	pr_err("%s console_initialized=%d \n", __func__,oem_console.console_initialized);
+
+	if(oem_console.console_initialized != 1 ) {
+		oem_console.console_initialized = 1;
+		ret = console_register(&msm_geni_console_driver);
+		if (ret)
+			return ret;
+
+		ret = platform_driver_register(&msm_geni_serial_platform_driver_oem);
+		if (ret) {
+			console_unregister(&msm_geni_console_driver);
+			return ret;
+		}
+		pr_info("%s: initialized", __func__);
+	}
+	return ret;
+}
+
+
+
+static int msm_serial_pinctrl_probe(struct platform_device *pdev)
+{
+
+	struct pinctrl *pinctrl = NULL;
+	struct pinctrl_state *set_state = NULL;
+	struct device *dev = &pdev->dev;
+
+	pr_err("%s\n", __func__);
+	pinctrl = devm_pinctrl_get(dev);
+
+	if (pinctrl != NULL) {
+
+		set_state = pinctrl_lookup_state(
+				pinctrl, "uart_pinctrl_deactive");
+
+		if (set_state != NULL)
+			pinctrl_select_state(pinctrl, set_state);
+
+		devm_pinctrl_put(pinctrl);
+	}
+	return 0;
+}
+
+static int msm_serial_pinctrl_remove(struct platform_device *pdev)
+{
+	return 0;
+}
+
+
+static const struct of_device_id oem_serial_pinctrl_of_match[] = {
+	{ .compatible = "oem,oem_serial_pinctrl" },
+	{}
+};
+
+
+static struct platform_driver msm_platform_serial_pinctrl_driver = {
+	.remove = msm_serial_pinctrl_remove,
+	.probe = msm_serial_pinctrl_probe,
+	.driver = {
+		.name = "oem_serial_pinctrl",
+	   .of_match_table = oem_serial_pinctrl_of_match,
+	},
+};
+
+static int	msm_serial_oem_pinctrl_init(void)
+{
+	int ret = 0;
+
+	pr_err("%s\n", __func__);
+
+	ret = platform_driver_register(&msm_platform_serial_pinctrl_driver);
+
+	return ret;
+}
+EXPORT_SYMBOL(msm_serial_oem_pinctrl_init);
+
+#define SERIAL_CMDLINE "ttyMSM0,115200n8"
+
+char oem_force_cmdline_str[60];
+
+int  msm_serial_oem_init(void)
+{
+	int ret = 0;
+
+	pr_err("%s\n", __func__);
+
+	memcpy(oem_force_cmdline_str, SERIAL_CMDLINE, sizeof(SERIAL_CMDLINE));
+	force_oem_console_setup(&oem_force_cmdline_str[0]);
+	oem_msm_geni_serial_init();
+	return ret;
+}
+EXPORT_SYMBOL(msm_serial_oem_init);
+
+void  msm_serial_oem_exit(void)
+{
+	pr_err("%s\n", __func__);
+	msm_geni_serial_exit();
+}
+EXPORT_SYMBOL(msm_serial_oem_exit);
+
+
 
 MODULE_DESCRIPTION("Serial driver for GENI based QTI serial cores");
 MODULE_LICENSE("GPL v2");
