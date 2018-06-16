@@ -117,7 +117,7 @@ static inline bool is_userdebug(void)
 
 static inline bool is_unlocked(void)
 {
-	static const char unlocked[] = "orange";
+	static const char unlocked[] = "green";
 
 	return !strncmp(verifiedbootstate, unlocked, sizeof(unlocked));
 }
