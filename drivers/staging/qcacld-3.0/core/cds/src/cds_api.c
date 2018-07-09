@@ -131,10 +131,8 @@ v_CONTEXT_t cds_init(void)
 	QDF_STATUS ret;
 
 	ret = qdf_debugfs_init();
-	if (ret != QDF_STATUS_SUCCESS) {
+	if (ret != QDF_STATUS_SUCCESS)
 		cds_err("Failed to init debugfs");
-		goto err_ret;
-	}
 
 	qdf_lock_stats_init();
 	qdf_mem_init();
@@ -170,7 +168,7 @@ deinit:
 	gp_cds_context->qdf_ctx = NULL;
 	gp_cds_context = NULL;
 	qdf_mem_zero(&g_cds_context, sizeof(g_cds_context));
-err_ret:
+
 	return NULL;
 }
 
@@ -590,6 +588,45 @@ err_probe_event:
 	return status;
 } /* cds_open() */
 
+static QDF_STATUS cds_pktlog_enable(void *pdev_txrx_ctx, void *scn)
+{
+	int errno;
+
+	switch (cds_get_conparam()) {
+	case QDF_GLOBAL_FTM_MODE:
+	case QDF_GLOBAL_EPPING_MODE:
+		return QDF_STATUS_SUCCESS;
+	default:
+		break;
+	}
+
+	htt_pkt_log_init(pdev_txrx_ctx, scn);
+
+	errno = pktlog_htc_attach();
+	if (errno)
+		goto pktlog_deinit;
+
+	return QDF_STATUS_SUCCESS;
+
+pktlog_deinit:
+	htt_pktlogmod_exit(pdev_txrx_ctx, scn);
+
+	return QDF_STATUS_E_FAILURE;
+}
+
+static void cds_pktlog_disable(void *pdev_txrx_ctx, void *scn)
+{
+	switch (cds_get_conparam()) {
+	case QDF_GLOBAL_FTM_MODE:
+	case QDF_GLOBAL_EPPING_MODE:
+		return;
+	default:
+		break;
+	}
+
+	htt_pktlogmod_exit(pdev_txrx_ctx, scn);
+}
+
 /**
  * cds_pre_enable() - pre enable cds
  * @cds_context: CDS context
@@ -633,12 +670,9 @@ QDF_STATUS cds_pre_enable(v_CONTEXT_t cds_context)
 	}
 
 	/* call Packetlog connect service */
-	if (QDF_GLOBAL_FTM_MODE != cds_get_conparam() &&
-	    QDF_GLOBAL_EPPING_MODE != cds_get_conparam()) {
-		htt_pkt_log_init(gp_cds_context->pdev_txrx_ctx, scn);
-		if (pktlog_htc_attach())
-			return QDF_STATUS_E_FAILURE;
-	}
+	qdf_status = cds_pktlog_enable(gp_cds_context->pdev_txrx_ctx, scn);
+	if (QDF_IS_STATUS_ERROR(qdf_status))
+		return qdf_status;
 
 	/* Reset wma wait event */
 	qdf_event_reset(&gp_cds_context->wmaCompleteEvent);
@@ -649,7 +683,7 @@ QDF_STATUS cds_pre_enable(v_CONTEXT_t cds_context)
 		QDF_TRACE(QDF_MODULE_ID_SYS, QDF_TRACE_LEVEL_FATAL,
 			  "Failed to WMA prestart");
 		QDF_ASSERT(0);
-		return QDF_STATUS_E_FAILURE;
+		goto pktlog_disable;
 	}
 
 	/* Need to update time out of complete */
@@ -672,7 +706,7 @@ QDF_STATUS cds_pre_enable(v_CONTEXT_t cds_context)
 		wlan_sys_probe();
 
 		QDF_ASSERT(0);
-		return QDF_STATUS_E_FAILURE;
+		goto pktlog_disable;
 	}
 
 	qdf_status = htc_start(gp_cds_context->htc_ctx);
@@ -680,7 +714,7 @@ QDF_STATUS cds_pre_enable(v_CONTEXT_t cds_context)
 		QDF_TRACE(QDF_MODULE_ID_SYS, QDF_TRACE_LEVEL_FATAL,
 			  "Failed to Start HTC");
 		QDF_ASSERT(0);
-		return QDF_STATUS_E_FAILURE;
+		goto pktlog_disable;
 	}
 	qdf_status = wma_wait_for_ready_event(gp_cds_context->pWMAContext);
 	if (!QDF_IS_STATUS_SUCCESS(qdf_status)) {
@@ -695,19 +729,27 @@ QDF_STATUS cds_pre_enable(v_CONTEXT_t cds_context)
 		if ((!cds_is_fw_down()) && (!cds_is_self_recovery_enabled()))
 			QDF_BUG(0);
 
+		wma_wmi_stop();
 		htc_stop(gp_cds_context->htc_ctx);
-		return QDF_STATUS_E_FAILURE;
+		goto pktlog_disable;
 	}
 
 	if (ol_txrx_pdev_post_attach(gp_cds_context->pdev_txrx_ctx)) {
 		QDF_TRACE(QDF_MODULE_ID_QDF, QDF_TRACE_LEVEL_FATAL,
 			"Failed to attach pdev");
+		wma_wmi_stop();
 		htc_stop(gp_cds_context->htc_ctx);
 		QDF_ASSERT(0);
-		return QDF_STATUS_E_FAILURE;
+		qdf_status = QDF_STATUS_E_FAILURE;
+		goto pktlog_disable;
 	}
 
 	return QDF_STATUS_SUCCESS;
+
+pktlog_disable:
+	cds_pktlog_disable(gp_cds_context->pdev_txrx_ctx, scn);
+
+	return qdf_status;
 }
 
 /**
@@ -911,6 +953,10 @@ QDF_STATUS cds_post_disable(void)
 		return QDF_STATUS_E_INVAL;
 	}
 
+	/* Clean up all MC thread message queues */
+	if (gp_cds_sched_context)
+		cds_sched_flush_mc_mqs(gp_cds_sched_context);
+
 	/*
 	 * With new state machine changes cds_close can be invoked without
 	 * cds_disable. So, send the following clean up prerequisites to fw,
@@ -927,6 +973,7 @@ QDF_STATUS cds_post_disable(void)
 	hif_reset_soc(hif_ctx);
 
 	if (gp_cds_context->htc_ctx) {
+		wma_wmi_stop();
 		htc_stop(gp_cds_context->htc_ctx);
 	}
 
@@ -2760,22 +2807,45 @@ QDF_STATUS cds_deregister_dp_cb(void)
 	return QDF_STATUS_SUCCESS;
 }
 
+uint32_t cds_get_connectivity_stats_pkt_bitmap(void *context)
+{
+	hdd_adapter_t *adapter = NULL;
+
+	if (!context)
+		return 0;
+
+	adapter = (hdd_adapter_t *)context;
+	if (unlikely(adapter->magic != WLAN_HDD_ADAPTER_MAGIC)) {
+		QDF_TRACE(QDF_MODULE_ID_HDD_DATA, QDF_TRACE_LEVEL_ERROR,
+			  "Magic cookie(%x) for adapter sanity verification is invalid",
+			  adapter->magic);
+		return 0;
+	}
+	return adapter->pkt_type_bitmap;
+}
+
 /**
  * cds_get_arp_stats_gw_ip() - get arp stats track IP
  *
  * Return: ARP stats IP to track
  */
-uint32_t cds_get_arp_stats_gw_ip(void)
+uint32_t cds_get_arp_stats_gw_ip(void *context)
 {
-	hdd_context_t *hdd_ctx;
+	hdd_adapter_t *adapter = NULL;
 
-	hdd_ctx = (hdd_context_t *) (gp_cds_context->pHDDContext);
-	if (!hdd_ctx) {
-		cds_err("Hdd Context is Null");
+	if (!context)
+		return 0;
+
+	adapter = (hdd_adapter_t *)context;
+
+	if (unlikely(adapter->magic != WLAN_HDD_ADAPTER_MAGIC)) {
+		QDF_TRACE(QDF_MODULE_ID_HDD_DATA, QDF_TRACE_LEVEL_ERROR,
+			  "Magic cookie(%x) for adapter sanity verification is invalid",
+			  adapter->magic);
 		return 0;
 	}
 
-	return hdd_ctx->track_arp_ip;
+	return adapter->track_arp_ip;
 }
 
 /**

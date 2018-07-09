@@ -1906,6 +1906,7 @@ struct roam_offload_scan_params {
 	bool fw_pmksa_cache;
 #endif
 	bool is_ese_assoc;
+	bool is_11r_assoc;
 	struct mobility_domain_info mdid;
 #ifndef WMI_NON_TLV_SUPPORT
 	/* THis is not available in non tlv target.
@@ -7429,12 +7430,22 @@ struct wmi_action_oui {
  * @flag: enable/disable stats
  * @pkt_type: type of packet(1 - arp)
  * @ip_addr: subnet ipv4 address in case of encrypted packets
+ * @pkt_type_bitmap: pkt bitmap
+ * @tcp_src_port: tcp src port for pkt tracking
+ * @tcp_dst_port: tcp dst port for pkt tracking
+ * @icmp_ipv4: target ipv4 address to track ping packets
+ * @reserved: reserved
  */
 struct set_arp_stats {
 	uint32_t vdev_id;
 	uint8_t flag;
 	uint8_t pkt_type;
 	uint32_t ip_addr;
+	uint32_t pkt_type_bitmap;
+	uint32_t tcp_src_port;
+	uint32_t tcp_dst_port;
+	uint32_t icmp_ipv4;
+	uint32_t reserved;
 };
 
 /**
@@ -7497,6 +7508,20 @@ struct wmi_mawc_roam_params {
 	uint32_t best_ap_rssi_threshold;
 	uint8_t rssi_stationary_high_adjust;
 	uint8_t rssi_stationary_low_adjust;
+};
+
+/**
+ * struct wmi_hw_filter_req_params - HW Filter mode parameters
+ * @vdev: VDEV id
+ * @enable: True: Enable HW filter, False: Disable
+ * @mode_bitmap: the hardware filter mode to configure
+ * @bssid: bss_id for get session.
+ */
+struct wmi_hw_filter_req_params {
+	uint8_t vdev_id;
+	bool enable;
+	uint8_t mode_bitmap;
+	struct qdf_mac_addr bssid;
 };
 
 #endif /* _WMI_UNIFIED_PARAM_H_ */

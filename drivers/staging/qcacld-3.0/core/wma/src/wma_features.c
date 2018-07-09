@@ -86,6 +86,8 @@
  * MCL platform.
  */
 #define WMA_SET_VDEV_IE_SOURCE_HOST 0x0
+#define WMI_TLV_HEADER_MASK		0xFFFF0000
+
 
 static const uint8_t arp_ptrn[] = {0x08, 0x06};
 static const uint8_t arp_mask[] = {0xff, 0xff};
@@ -1857,7 +1859,7 @@ int wma_nan_rsp_event_handler(void *handle, uint8_t *event_buf,
 	alloc_len = sizeof(tSirNanEvent);
 	alloc_len += nan_rsp_event_hdr->data_len;
 	if (nan_rsp_event_hdr->data_len > ((WMI_SVC_MSG_MAX_SIZE -
-	    sizeof(*nan_rsp_event_hdr)) / sizeof(uint8_t)) ||
+	    WMI_TLV_HDR_SIZE - sizeof(*nan_rsp_event_hdr)) / sizeof(uint8_t)) ||
 	    nan_rsp_event_hdr->data_len > param_buf->num_data) {
 		WMA_LOGE("excess data length:%d, num_data:%d",
 			nan_rsp_event_hdr->data_len, param_buf->num_data);
@@ -2937,6 +2939,11 @@ static QDF_STATUS spectral_process_phyerr(tp_wma_handle wma, uint8_t *data,
 	combined_rssi = p_rfqual->rssi_comb;
 
 	get_spectral_control_info(wma, &upper_is_control, &lower_is_control);
+
+	if (!wma->dfs_ic || !wma->dfs_ic->ic_curchan) {
+		WMA_LOGE("%s: channel information is not available", __func__);
+		return QDF_STATUS_E_FAILURE;
+	}
 
 	if (upper_is_control)
 		rssi_up = control_rssi;
@@ -4673,6 +4680,11 @@ int wma_d0_wow_disable_ack_event(void *handle, u_int8_t *event,
 int wma_wow_wakeup_host_event(void *handle, uint8_t *event,
 			      uint32_t len)
 {
+	uint8_t *bssid;
+	uint8_t peer_id;
+	ol_txrx_peer_handle peer;
+	ol_txrx_pdev_handle pdev;
+	tpDeleteStaContext del_sta_ctx;
 	tp_wma_handle wma = (tp_wma_handle) handle;
 	struct wma_txrx_node *wma_vdev = NULL;
 	WMI_WOW_WAKEUP_HOST_EVENTID_param_tlvs *param_buf;
@@ -4683,6 +4695,7 @@ int wma_wow_wakeup_host_event(void *handle, uint8_t *event,
 	uint8_t *wow_buf_data = NULL;
 	int tlv_ok_status;
 
+	pdev = cds_get_context(QDF_MODULE_ID_TXRX);
 	param_buf = (WMI_WOW_WAKEUP_HOST_EVENTID_param_tlvs *) event;
 	if (!param_buf) {
 		WMA_LOGE("Invalid wow wakeup host event buf");
@@ -4690,6 +4703,8 @@ int wma_wow_wakeup_host_event(void *handle, uint8_t *event,
 	}
 
 	wake_info = param_buf->fixed_param;
+	bssid = wma->interfaces[wake_info->vdev_id].bssid;
+	peer = ol_txrx_find_peer_by_addr(pdev, bssid, &peer_id);
 
 	/* unspecified means apps-side wakeup, so there won't be a vdev */
 	if (wake_info->wake_reason != WOW_REASON_UNSPECIFIED) {
@@ -4960,16 +4975,20 @@ int wma_wow_wakeup_host_event(void *handle, uint8_t *event,
 		 * programmed. So do not check for cookie.
 		 */
 		WMA_LOGE("WOW_REASON_TIMER_INTR_RECV received, indicating key exchange did not finish. Initiate disconnect");
-		if (param_buf->wow_packet_buffer) {
-			WMA_LOGD("wow_packet_buffer dump");
-			qdf_trace_hex_dump(QDF_MODULE_ID_WMA,
-				QDF_TRACE_LEVEL_DEBUG,
-				param_buf->wow_packet_buffer, wow_buf_pkt_len);
-			wma_peer_sta_kickout_event_handler(handle,
-				wmi_cmd_struct_ptr, wow_buf_pkt_len);
-		} else {
-		    WMA_LOGD("No wow_packet_buffer present");
+
+		del_sta_ctx = (tpDeleteStaContext) qdf_mem_malloc(sizeof(*del_sta_ctx));
+		if (!del_sta_ctx) {
+			WMA_LOGE("%s: mem alloc failed ", __func__);
+			break;
 		}
+		del_sta_ctx->is_tdls = false;
+		del_sta_ctx->vdev_id = wake_info->vdev_id;
+		del_sta_ctx->staId = peer_id;
+		qdf_mem_copy(del_sta_ctx->addr2, bssid, IEEE80211_ADDR_LEN);
+		qdf_mem_copy(del_sta_ctx->bssId, bssid, IEEE80211_ADDR_LEN);
+		del_sta_ctx->reasonCode = HAL_DEL_STA_REASON_CODE_KEEP_ALIVE;
+		wma_send_msg(wma, SIR_LIM_DELETE_STA_CONTEXT_IND,
+			     (void *)del_sta_ctx, 0);
 		break;
 	default:
 		break;
@@ -7377,28 +7396,18 @@ QDF_STATUS wma_enable_arp_ns_offload(tp_wma_handle wma,
 }
 
 QDF_STATUS wma_conf_hw_filter_mode(tp_wma_handle wma,
-				   struct hw_filter_request *req)
+				   struct wmi_hw_filter_req_params *req)
 {
 	QDF_STATUS status;
-	uint8_t vdev_id;
 
-	/* Get the vdev id */
-	if (!wma_find_vdev_by_bssid(wma, req->bssid.bytes, &vdev_id)) {
-		WMA_LOGE("vdev handle is invalid for %pM",
-			 req->bssid.bytes);
-		qdf_mem_free(req);
-		return QDF_STATUS_E_INVAL;
-	}
-
-	if (!wma->interfaces[vdev_id].vdev_up) {
+	if (!wma->interfaces[req->vdev_id].vdev_up) {
 		WMA_LOGE("vdev %d is not up skipping enable Broadcast Filter",
-			 vdev_id);
+			 req->vdev_id);
 		qdf_mem_free(req);
 		return QDF_STATUS_E_FAILURE;
 	}
 
-	status = wmi_unified_conf_hw_filter_mode_cmd(wma->wmi_handle, vdev_id,
-						     req->mode_bitmap);
+	status = wmi_unified_conf_hw_filter_mode_cmd(wma->wmi_handle, req);
 	if (QDF_IS_STATUS_ERROR(status))
 		WMA_LOGE("Failed to enable/disable Broadcast Filter");
 
@@ -10594,6 +10603,8 @@ int wma_get_arp_stats_handler(void *handle, uint8_t *data,
 {
 	WMI_VDEV_GET_ARP_STAT_EVENTID_param_tlvs *param_buf;
 	wmi_vdev_get_arp_stats_event_fixed_param *data_event;
+	wmi_vdev_get_connectivity_check_stats *connect_stats_event;
+	uint8_t *buf_ptr;
 	struct rsp_stats rsp;
 	tpAniSirGlobal mac = cds_get_context(QDF_MODULE_ID_PE);
 
@@ -10635,7 +10646,23 @@ int wma_get_arp_stats_handler(void *handle, uint8_t *data,
 	rsp.ba_session_establishment_status =
 		data_event->ba_session_establishment_status;
 
-	mac->sme.get_arp_stats_cb(mac->hHdd, &rsp);
+	buf_ptr = (uint8_t *)data_event;
+	buf_ptr = buf_ptr + sizeof(wmi_vdev_get_arp_stats_event_fixed_param) +
+		  WMI_TLV_HDR_SIZE;
+	connect_stats_event = (wmi_vdev_get_connectivity_check_stats *)buf_ptr;
+
+	if (((connect_stats_event->tlv_header & WMI_TLV_HEADER_MASK) >> 16 ==
+	      WMITLV_TAG_STRUC_wmi_vdev_get_connectivity_check_stats)) {
+		rsp.connect_stats_present = true;
+		rsp.tcp_ack_recvd = connect_stats_event->tcp_ack_recvd;
+		rsp.icmpv4_rsp_recvd = connect_stats_event->icmpv4_rsp_recvd;
+		WMA_LOGD("tcp_ack_recvd %d icmpv4_rsp_recvd %d",
+			connect_stats_event->tcp_ack_recvd,
+			connect_stats_event->icmpv4_rsp_recvd);
+	}
+
+	mac->sme.get_arp_stats_cb(mac->hHdd, &rsp,
+				  mac->sme.get_arp_stats_context);
 
 	EXIT();
 

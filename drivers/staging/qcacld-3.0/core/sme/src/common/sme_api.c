@@ -692,8 +692,10 @@ tListElem *csr_get_cmd_to_process(tpAniSirGlobal pMac, tDblLinkList *pList,
 		pCommand = GET_BASE_ADDR(pCurEntry, tSmeCmd, Link);
 
 		if (pCommand->sessionId != sessionId ||
-		    pCommand->command ==  eSmeCommandSetKey) {
-			sme_debug("selected the command with different sessionId or setkey");
+		    pCommand->command ==  eSmeCommandSetKey ||
+		    pCommand->command ==  eSmeCommandWmStatusChange) {
+			sme_debug("selected the command with different sessionId or cmd %d",
+				  pCommand->command);
 			return pCurEntry;
 		}
 
@@ -2459,6 +2461,9 @@ QDF_STATUS sme_process_msg(tHalHandle hHal, cds_msg_t *pMsg)
 {
 	QDF_STATUS status = QDF_STATUS_E_FAILURE;
 	tpAniSirGlobal pMac = PMAC_STRUCT(hHal);
+	struct sir_peer_info *peer_stats;
+	struct sir_peer_info_resp *peer_info_rsp;
+
 #ifdef WLAN_FEATURE_ROAM_OFFLOAD
 	tSmeCmd *sme_cmd = NULL;
 #endif
@@ -2781,6 +2786,17 @@ QDF_STATUS sme_process_msg(tHalHandle hHal, cds_msg_t *pMsg)
 		if (pMac->sme.pget_peer_info_ind_cb)
 			pMac->sme.pget_peer_info_ind_cb(pMsg->bodyptr,
 				pMac->sme.pget_peer_info_cb_context);
+		if (pMsg->bodyptr) {
+			peer_info_rsp = (struct sir_peer_info_resp *)
+							(pMsg->bodyptr);
+			peer_stats = (struct sir_peer_info *)
+							(peer_info_rsp->info);
+			if (peer_stats) {
+				pMac->peer_rssi = peer_stats[0].rssi;
+				pMac->peer_txrate = peer_stats[0].tx_rate;
+				pMac->peer_rxrate = peer_stats[0].rx_rate;
+			}
+		}
 		qdf_mem_free(pMsg->bodyptr);
 		break;
 	case eWNI_SME_GET_PEER_INFO_EXT_IND:
@@ -3301,13 +3317,15 @@ QDF_STATUS sme_scan_request(tHalHandle hal, uint8_t session_id,
 	}
 
 	if (!mac_ctx->scan.fScanEnable) {
-		sme_err("fScanEnable false");
+		sme_err_rate_limited(SME_SCAN_REJECT_RATE_LIMIT,
+				     "fScanEnable false");
 		return status;
 	}
 
 	scan_count = csr_ll_count(&mac_ctx->sme.smeScanCmdActiveList);
 	if (scan_count >= mac_ctx->scan.max_scan_count) {
-		sme_err("Max scan reached");
+		sme_err_rate_limited(SME_SCAN_REJECT_RATE_LIMIT,
+				     "Max scan reached");
 		return QDF_STATUS_E_FAILURE;
 	}
 
@@ -6300,12 +6318,12 @@ QDF_STATUS sme_set_host_offload(tHalHandle hHal, uint8_t sessionId,
 }
 
 QDF_STATUS sme_conf_hw_filter_mode(tHalHandle hal, uint8_t session_id,
-				   uint8_t mode_bitmap)
+				   uint8_t mode_bitmap, bool filter_enable)
 {
 	tpAniSirGlobal pMac = PMAC_STRUCT(hal);
 	QDF_STATUS status;
 	tCsrRoamSession *session;
-	struct hw_filter_request *req;
+	struct wmi_hw_filter_req_params *req;
 	cds_msg_t msg;
 
 	status = sme_acquire_global_lock(&pMac->sme);
@@ -6328,6 +6346,8 @@ QDF_STATUS sme_conf_hw_filter_mode(tHalHandle hal, uint8_t session_id,
 		return QDF_STATUS_E_NOMEM;
 	}
 
+	req->vdev_id = session_id;
+	req->enable = filter_enable;
 	req->mode_bitmap = mode_bitmap;
 	qdf_copy_macaddr(&req->bssid, &session->connectedProfile.bssid);
 
@@ -9195,7 +9215,7 @@ QDF_STATUS sme_stop_roaming(tHalHandle hal, uint8_t session_id, uint8_t reason)
 	if (reason == eCsrForcedDisassoc)
 		req->reason = REASON_ROAM_STOP_ALL;
 	else
-		req->reason = REASON_ROAM_SYNCH_FAILED;
+		req->reason = REASON_SME_ISSUED;
 	req->sessionId = session_id;
 	if (csr_neighbor_middle_of_roaming(mac_ctx, session_id))
 		req->middle_of_roaming = 1;
@@ -10974,6 +10994,38 @@ QDF_STATUS sme_get_link_speed(tHalHandle hHal, tSirLinkSpeedInfo *lsReq,
 	}
 
 	return status;
+}
+
+QDF_STATUS sme_get_peer_stats(tpAniSirGlobal mac, struct sir_peer_info_req req)
+{
+	QDF_STATUS qdf_status;
+	cds_msg_t message;
+
+	qdf_status = sme_acquire_global_lock(&mac->sme);
+	if (!QDF_IS_STATUS_SUCCESS(qdf_status)) {
+		sme_debug("Failed to get Lock");
+		return qdf_status;
+	}
+	/* serialize the req through MC thread */
+	message.bodyptr = qdf_mem_malloc(sizeof(req));
+	if (NULL == message.bodyptr) {
+		QDF_TRACE(QDF_MODULE_ID_SME, QDF_TRACE_LEVEL_ERROR,
+			  "%s: Memory allocation failed.", __func__);
+		sme_release_global_lock(&mac->sme);
+		return QDF_STATUS_E_NOMEM;
+	}
+	qdf_mem_copy(message.bodyptr, &req, sizeof(req));
+	message.type = WMA_GET_PEER_INFO;
+	message.reserved = 0;
+	qdf_status = cds_mq_post_message(QDF_MODULE_ID_WMA, &message);
+	if (!QDF_IS_STATUS_SUCCESS(qdf_status)) {
+		QDF_TRACE(QDF_MODULE_ID_SME, QDF_TRACE_LEVEL_ERROR,
+			  "%s: Post get peer info msg fail", __func__);
+		qdf_mem_free(message.bodyptr);
+		qdf_status = QDF_STATUS_E_FAILURE;
+	}
+		sme_release_global_lock(&mac->sme);
+		return qdf_status;
 }
 
 QDF_STATUS sme_get_peer_info(tHalHandle hal, struct sir_peer_info_req req,
@@ -15604,13 +15656,15 @@ QDF_STATUS sme_set_rssi_threshold_breached_cb(tHalHandle h_hal,
  * sme_set_nud_debug_stats_cb() - set nud debug stats callback
  * @hal: global hal handle
  * @cb: callback function pointer
+ * @context: callback context
  *
- * This function stores nud debug stats callback function.
+ * This function stores nud debug stats callback function and context
  *
  * Return: QDF_STATUS enumeration.
  */
 QDF_STATUS sme_set_nud_debug_stats_cb(tHalHandle hal,
-				void (*cb)(void *, struct rsp_stats *))
+			void (*cb)(void *, struct rsp_stats *, void *),
+			void *context)
 {
 	QDF_STATUS status  = QDF_STATUS_SUCCESS;
 	tpAniSirGlobal mac;
@@ -15631,6 +15685,7 @@ QDF_STATUS sme_set_nud_debug_stats_cb(tHalHandle hal,
 	}
 
 	mac->sme.get_arp_stats_cb = cb;
+	mac->sme.get_arp_stats_context = context;
 	sme_release_global_lock(&mac->sme);
 	return status;
 }
@@ -18886,4 +18941,50 @@ QDF_STATUS sme_destroy_config(tHalHandle hal)
 	status = sme_destroy_action_oui_info(mac_ctx);
 
 	return status;
+}
+
+bool sme_is_sta_key_exchange_in_progress(tHalHandle hal, uint8_t session_id)
+{
+	tpAniSirGlobal mac_ctx = PMAC_STRUCT(hal);
+
+	if (!CSR_IS_SESSION_VALID(mac_ctx, session_id)) {
+		sme_err("Invalid session id: %d", session_id);
+		return false;
+	}
+
+	return CSR_IS_WAIT_FOR_KEY(mac_ctx, session_id);
+}
+
+bool sme_validate_channel_list(tHalHandle hal,
+				      uint8_t *chan_list,
+				      uint8_t num_channels)
+{
+	tpAniSirGlobal mac_ctx = PMAC_STRUCT(hal);
+	uint8_t i = 0;
+	uint8_t j;
+	bool found;
+	tCsrChannel *ch_lst_info = &mac_ctx->scan.base_channels;
+
+	if (!chan_list || !num_channels) {
+		sme_err("Chan list empty %pK or num_channels is 0", chan_list);
+		return false;
+	}
+
+	while (i < num_channels) {
+		found = false;
+		for (j = 0; j < ch_lst_info->numChannels; j++) {
+			if (ch_lst_info->channelList[j] == chan_list[i]) {
+				found = true;
+				break;
+			}
+		}
+
+		if (!found) {
+			sme_debug("Invalid channel %d", chan_list[i]);
+			return false;
+		}
+
+		i++;
+	}
+	return true;
 }

@@ -65,6 +65,7 @@
 #else
 #include "wlan_tgt_def_config.h"
 #endif
+#include <qdf_idr.h>
 
 /** Number of Tx Queues */
 #ifdef QCA_LL_TX_FLOW_CONTROL_V2
@@ -285,12 +286,18 @@
 #define HDD_MOD_EXIT_SSR_MAX_RETRIES 75
 #endif
 
+#define HDD_CFG_REQUEST_FIRMWARE_RETRIES (3)
+#define HDD_CFG_REQUEST_FIRMWARE_DELAY (20)
+
 #ifdef WLAN_FEATURE_GTK_OFFLOAD
 #define GTK_OFFLOAD_ENABLE  0
 #define GTK_OFFLOAD_DISABLE 1
 #endif
 
 #define MAX_USER_COMMAND_SIZE 4096
+#define DNS_DOMAIN_NAME_MAX_LEN 255
+#define ICMPv6_ADDR_LEN 16
+
 
 #define HDD_MIN_TX_POWER (-100) /* minimum tx power */
 #define HDD_MAX_TX_POWER (+100) /* maximum tx power */
@@ -408,26 +415,6 @@ struct statsContext {
 	unsigned int magic;
 };
 
-struct linkspeedContext {
-	struct completion completion;
-	hdd_adapter_t *pAdapter;
-	unsigned int magic;
-};
-
-/**
- * struct random_mac_context - Context used with hdd_random_mac_callback
- * @random_mac_completion: Event on which hdd_set_random_mac will wait
- * @adapter: Pointer to adapter
- * @magic: For valid context this is set to ACTION_FRAME_RANDOM_CONTEXT_MAGIC
- * @set_random_addr: Status of random filter set
- */
-struct random_mac_context {
-	struct completion random_mac_completion;
-	hdd_adapter_t *adapter;
-	unsigned int magic;
-	bool set_random_addr;
-};
-
 extern spinlock_t hdd_context_lock;
 extern struct mutex hdd_init_deinit_lock;
 
@@ -435,12 +422,9 @@ extern struct mutex hdd_init_deinit_lock;
 #define PEER_INFO_CONTEXT_MAGIC 0x50494E46  /* PEER_INFO(PINF) */
 #define POWER_CONTEXT_MAGIC 0x504F5752  /* POWR */
 #define SNR_CONTEXT_MAGIC   0x534E5200  /* SNR */
-#define LINK_CONTEXT_MAGIC  0x4C494E4B  /* LINKSPEED */
 #define LINK_STATUS_MAGIC   0x4C4B5354  /* LINKSTATUS(LNST) */
-#define TEMP_CONTEXT_MAGIC  0x74656d70   /* TEMP (temperature) */
 #define BPF_CONTEXT_MAGIC 0x4575354    /* BPF */
 #define POWER_STATS_MAGIC 0x14111990
-#define RCPI_CONTEXT_MAGIC  0x7778888  /* RCPI */
 #define ACTION_FRAME_RANDOM_CONTEXT_MAGIC 0x87878787
 
 /* MAX OS Q block time value in msec
@@ -515,6 +499,19 @@ typedef struct hdd_pmf_stats_s {
 } hdd_pmf_stats_t;
 #endif
 
+/**
+ * struct hdd_arp_stats_s - arp debug stats count
+ * @tx_arp_req_count: no. of arp req received from network stack
+ * @rx_arp_rsp_count: no. of arp res received from FW
+ * @tx_dropped: no. of arp req dropped at hdd layer
+ * @rx_dropped: no. of arp res dropped
+ * @rx_delivered: no. of arp res delivered to network stack
+ * @rx_refused: no of arp rsp refused (not delivered) to network stack
+ * @tx_host_fw_sent: no of arp req sent by FW OTA
+ * @rx_host_drop_reorder: no of arp res dropped by host
+ * @rx_fw_cnt: no of arp res received by FW
+ * @tx_ack_cnt: no of arp req acked by FW
+ */
 struct hdd_arp_stats_s {
 	uint16_t tx_arp_req_count;
 	uint16_t rx_arp_rsp_count;
@@ -528,6 +525,88 @@ struct hdd_arp_stats_s {
 	uint16_t tx_ack_cnt;
 };
 
+/**
+ * struct hdd_dns_stats_s - dns debug stats count
+ * @tx_dns_req_count: no. of dns query received from network stack
+ * @rx_dns_rsp_count: no. of dns res received from FW
+ * @tx_dropped: no. of dns query dropped at hdd layer
+ * @rx_delivered: no. of dns res delivered to network stack
+ * @rx_refused: no of dns res refused (not delivered) to network stack
+ * @tx_host_fw_sent: no of dns query sent by FW OTA
+ * @rx_host_drop: no of dns res dropped by host
+ * @tx_ack_cnt: no of dns req acked by FW
+ */
+struct hdd_dns_stats_s {
+	uint16_t tx_dns_req_count;
+	uint16_t rx_dns_rsp_count;
+	uint16_t tx_dropped;
+	uint16_t rx_delivered;
+	uint16_t rx_refused;
+	uint16_t tx_host_fw_sent;
+	uint16_t rx_host_drop;
+	uint16_t tx_ack_cnt;
+};
+
+/**
+ * struct hdd_tcp_stats_s - tcp debug stats count
+ * @tx_tcp_syn_count: no. of tcp syn received from network stack
+ * @@tx_tcp_ack_count: no. of tcp ack received from network stack
+ * @rx_tcp_syn_ack_count: no. of tcp syn ack received from FW
+ * @tx_tcp_syn_dropped: no. of tcp syn dropped at hdd layer
+ * @tx_tcp_ack_dropped: no. of tcp ack dropped at hdd layer
+ * @rx_delivered: no. of tcp syn ack delivered to network stack
+ * @rx_refused: no of tcp syn ack refused (not delivered) to network stack
+ * @tx_tcp_syn_host_fw_sent: no of tcp syn sent by FW OTA
+ * @@tx_tcp_ack_host_fw_sent: no of tcp ack sent by FW OTA
+ * @rx_host_drop: no of tcp syn ack dropped by host
+ * @tx_tcp_syn_ack_cnt: no of tcp syn acked by FW
+ * @tx_tcp_syn_ack_cnt: no of tcp ack acked by FW
+ * @is_tcp_syn_ack_rcv: flag to check tcp syn ack received or not
+ * @is_tcp_ack_sent: flag to check tcp ack sent or not
+ */
+struct hdd_tcp_stats_s {
+	uint16_t tx_tcp_syn_count;
+	uint16_t tx_tcp_ack_count;
+	uint16_t rx_tcp_syn_ack_count;
+	uint16_t tx_tcp_syn_dropped;
+	uint16_t tx_tcp_ack_dropped;
+	uint16_t rx_delivered;
+	uint16_t rx_refused;
+	uint16_t tx_tcp_syn_host_fw_sent;
+	uint16_t tx_tcp_ack_host_fw_sent;
+	uint16_t rx_host_drop;
+	uint16_t rx_fw_cnt;
+	uint16_t tx_tcp_syn_ack_cnt;
+	uint16_t tx_tcp_ack_ack_cnt;
+	bool is_tcp_syn_ack_rcv;
+	bool is_tcp_ack_sent;
+
+};
+
+/**
+ * struct hdd_icmpv4_stats_s - icmpv4 debug stats count
+ * @tx_icmpv4_req_count: no. of icmpv4 req received from network stack
+ * @rx_icmpv4_rsp_count: no. of icmpv4 res received from FW
+ * @tx_dropped: no. of icmpv4 req dropped at hdd layer
+ * @rx_delivered: no. of icmpv4 res delivered to network stack
+ * @rx_refused: no of icmpv4 res refused (not delivered) to network stack
+ * @tx_host_fw_sent: no of icmpv4 req sent by FW OTA
+ * @rx_host_drop: no of icmpv4 res dropped by host
+ * @rx_fw_cnt: no of icmpv4 res received by FW
+ * @tx_ack_cnt: no of icmpv4 req acked by FW
+ */
+struct hdd_icmpv4_stats_s {
+	uint16_t tx_icmpv4_req_count;
+	uint16_t rx_icmpv4_rsp_count;
+	uint16_t tx_dropped;
+	uint16_t rx_delivered;
+	uint16_t rx_refused;
+	uint16_t tx_host_fw_sent;
+	uint16_t rx_host_drop;
+	uint16_t rx_fw_cnt;
+	uint16_t tx_ack_cnt;
+};
+
 typedef struct hdd_stats_s {
 	tCsrSummaryStatsInfo summary_stat;
 	tCsrGlobalClassAStatsInfo ClassA_stat;
@@ -535,6 +614,9 @@ typedef struct hdd_stats_s {
 	struct csr_per_chain_rssi_stats_info  per_chain_rssi_stats;
 	hdd_tx_rx_stats_t hddTxRxStats;
 	struct hdd_arp_stats_s hdd_arp_stats;
+	struct hdd_dns_stats_s hdd_dns_stats;
+	struct hdd_tcp_stats_s hdd_tcp_stats;
+	struct hdd_icmpv4_stats_s hdd_icmpv4_stats;
 #ifdef WLAN_FEATURE_11W
 	hdd_pmf_stats_t hddPmfStats;
 #endif
@@ -696,12 +778,13 @@ typedef struct hdd_remain_on_chan_ctx {
 	struct ieee80211_channel chan;
 	enum nl80211_channel_type chan_type;
 	unsigned int duration;
-	u64 cookie;
+	int32_t id;
 	enum rem_on_channel_request_type rem_on_chan_request;
 	qdf_mc_timer_t hdd_remain_on_chan_timer;
 	action_pkt_buffer_t action_pkt_buff;
 	bool hdd_remain_on_chan_cancel_in_progress;
 	uint32_t scan_id;
+	bool is_recd_roc_ready;
 } hdd_remain_on_chan_ctx_t;
 
 /* RoC Request entry */
@@ -755,7 +838,7 @@ enum action_frm_type {
 
 typedef struct hdd_cfg80211_state_s {
 	uint16_t current_freq;
-	u64 action_cookie;
+	int32_t action_id;
 	uint8_t *buf;
 	size_t len;
 	hdd_remain_on_chan_ctx_t *remain_on_chan_ctx;
@@ -1061,6 +1144,7 @@ struct hdd_ap_ctx_s {
 
 	/* Fw txrx stats info */
 	struct hdd_fw_txrx_stats txrx_stats;
+	qdf_atomic_t acs_in_progress;
 };
 
 typedef struct hdd_scaninfo_s {
@@ -1232,8 +1316,9 @@ struct hdd_adapter_s {
 	struct net_device_stats stats;
 	/** HDD statistics*/
 	hdd_stats_t hdd_stats;
-	/** linkspeed statistics */
-	tSirLinkSpeedInfo ls_stats;
+
+	/* estimated link speed */
+	u32 estimated_linkspeed;
 	/* SAP peer station info */
 	struct sir_peer_sta_info peer_sta_info;
 
@@ -1402,14 +1487,8 @@ struct hdd_adapter_s {
 	/* Time stamp for start RoC request */
 	uint64_t start_roc_ts;
 
-	/* State for synchronous OCB requests to WMI */
-	struct sir_ocb_set_config_response ocb_set_config_resp;
-	struct sir_ocb_get_tsf_timer_response ocb_get_tsf_timer_resp;
-	struct sir_dcc_get_stats_response *dcc_get_stats_resp;
-	struct sir_dcc_update_ndl_response dcc_update_ndl_resp;
-
-	/* MAC addresses used for OCB interfaces */
 #ifdef WLAN_FEATURE_DSRC
+	/* MAC addresses used for OCB interfaces */
 	struct qdf_mac_addr ocb_mac_address[QDF_MAX_CONCURRENCY_PERSONA];
 	int ocb_mac_addr_count;
 #endif
@@ -1449,6 +1528,13 @@ struct hdd_adapter_s {
 	struct lfr_firmware_status lfr_fw_status;
 	bool con_status;
 	bool dad;
+	uint32_t pkt_type_bitmap;
+	uint32_t track_arp_ip;
+	uint8_t dns_payload[256];
+	uint32_t track_dns_domain_len;
+	uint32_t track_src_port;
+	uint32_t track_dest_port;
+	uint32_t track_dest_ipv4;
 	/* random address management for management action frames */
 	spinlock_t random_mac_lock;
 	struct action_frame_random_mac random_mac[MAX_RANDOM_MAC_ADDRS];
@@ -1644,14 +1730,6 @@ struct suspend_resume_stats {
 	uint32_t suspends;
 	uint32_t resumes;
 	uint32_t suspend_fail[SUSPEND_FAIL_MAX_COUNT];
-};
-
-/**
- * struct hdd_nud_stats_context - hdd NUD stats context
- * @response_event: NUD stats request wait event
- */
-struct hdd_nud_stats_context {
-	struct completion response_event;
 };
 
 /**
@@ -1930,6 +2008,8 @@ struct hdd_context_s {
 	struct delayed_work roc_req_work;
 	qdf_spinlock_t hdd_roc_req_q_lock;
 	qdf_list_t hdd_roc_req_q;
+	/*QDF ID allocation */
+	qdf_idr p2p_idr;
 	qdf_spinlock_t hdd_scan_req_q_lock;
 	qdf_list_t hdd_scan_req_q;
 	uint8_t miracast_value;
@@ -2023,8 +2103,6 @@ struct hdd_context_s {
 	uint8_t curr_band;
 	uint32_t no_of_probe_req_ouis;
 	uint32_t *probe_req_voui;
-	struct hdd_nud_stats_context nud_stats_context;
-	uint32_t track_arp_ip;
 	uint8_t bt_a2dp_active:1;
 	uint8_t bt_vo_active:1;
 #ifdef FEATURE_SPECTRAL_SCAN
@@ -2124,10 +2202,23 @@ enum tQDF_GLOBAL_CON_MODE hdd_get_conparam(void);
 void hdd_abort_mac_scan(hdd_context_t *pHddCtx, uint8_t sessionId,
 			uint32_t scan_id, eCsrAbortReason reason);
 void hdd_cleanup_actionframe(hdd_context_t *pHddCtx, hdd_adapter_t *pAdapter);
-
+void hdd_cleanup_actionframe_no_wait(hdd_context_t *pHddCtx,
+		hdd_adapter_t *pAdapter);
 void crda_regulatory_entry_default(uint8_t *countryCode, int domain_id);
 void wlan_hdd_reset_prob_rspies(hdd_adapter_t *pHostapdAdapter);
 void hdd_prevent_suspend(uint32_t reason);
+
+/*
+ * hdd_get_first_valid_adapter() - Get the first valid adapter from adapter list
+ *
+ * This function is used to fetch the first valid adapter from the adapter
+ * list. If there is no valid adapter then it returns NULL
+ *
+ * Return: NULL if no valid adapter found in the adapter list
+ *
+ */
+hdd_adapter_t *hdd_get_first_valid_adapter(void);
+
 void hdd_allow_suspend(uint32_t reason);
 void hdd_prevent_suspend_timeout(uint32_t timeout, uint32_t reason);
 
@@ -2646,17 +2737,6 @@ void wlan_hdd_start_sap(hdd_adapter_t *ap_adapter, bool reinit);
 void hdd_set_rx_mode_rps(hdd_context_t *hdd_ctx, void *padapter, bool enable);
 
 /**
- * hdd_init_nud_stats_ctx() - initialize NUD stats context
- * @hdd_ctx: Pointer to hdd context
- *
- * Return: none
- */
-static inline void hdd_init_nud_stats_ctx(hdd_context_t *hdd_ctx)
-{
-	init_completion(&hdd_ctx->nud_stats_context.response_event);
-}
-
-/**
  * hdd_dbs_scan_selection_init() - initialization for DBS scan selection config
  * @hdd_ctx: HDD context
  *
@@ -2864,5 +2944,27 @@ hdd_station_info_t *hdd_get_stainfo(hdd_station_info_t *aStaInfo,
 
 int hdd_driver_memdump_init(void);
 void hdd_driver_memdump_deinit(void);
+
+/**
+ * hdd_is_cli_iface_up() - check if there is any cli iface up
+ * @hdd_ctx: HDD context
+ *
+ * Return: return true if there is any cli iface(STA/P2P_CLI) is up
+ *         else return false
+ */
+bool hdd_is_cli_iface_up(hdd_context_t *hdd_ctx);
+
+/**
+ * hdd_get_nud_stats_cb() - callback api to update the stats received from FW
+ * @data: pointer to hdd context.
+ * @rsp: pointer to data received from FW.
+ * @context: callback context
+ *
+ * This is called when wlan driver received response event for
+ * get arp stats to firmware.
+ *
+ * Return: None
+ */
+void hdd_get_nud_stats_cb(void *data, struct rsp_stats *rsp, void *context);
 
 #endif /* end #if !defined(WLAN_HDD_MAIN_H) */

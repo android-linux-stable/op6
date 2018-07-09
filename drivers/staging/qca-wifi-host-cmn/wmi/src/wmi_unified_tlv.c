@@ -2151,6 +2151,7 @@ QDF_STATUS send_set_mimops_cmd_tlv(wmi_unified_t wmi_handle,
 		break;
 	default:
 		WMI_LOGE("%s:INVALID Mimo PS CONFIG", __func__);
+		wmi_buf_free(buf);
 		return QDF_STATUS_E_FAILURE;
 	}
 
@@ -4677,7 +4678,8 @@ QDF_STATUS send_roam_scan_offload_mode_cmd_tlv(wmi_unified_t wmi_handle,
 			if ((auth_mode != WMI_AUTH_NONE) &&
 				((auth_mode != WMI_AUTH_OPEN) ||
 				 (auth_mode == WMI_AUTH_OPEN &&
-				  roam_req->mdid.mdie_present) ||
+				  roam_req->mdid.mdie_present &&
+				  roam_req->is_11r_assoc) ||
 				  roam_req->is_ese_assoc)) {
 				len += WMI_TLV_HDR_SIZE;
 				if (roam_req->is_ese_assoc)
@@ -4686,7 +4688,8 @@ QDF_STATUS send_roam_scan_offload_mode_cmd_tlv(wmi_unified_t wmi_handle,
 				else if (auth_mode == WMI_AUTH_FT_RSNA ||
 					 auth_mode == WMI_AUTH_FT_RSNA_PSK ||
 					 (auth_mode == WMI_AUTH_OPEN &&
-					  roam_req->mdid.mdie_present))
+					  roam_req->mdid.mdie_present &&
+					  roam_req->is_11r_assoc))
 					len +=
 					sizeof(wmi_roam_11r_offload_tlv_param);
 				else
@@ -4806,7 +4809,8 @@ QDF_STATUS send_roam_scan_offload_mode_cmd_tlv(wmi_unified_t wmi_handle,
 		if ((auth_mode != WMI_AUTH_NONE) &&
 		    ((auth_mode != WMI_AUTH_OPEN) ||
 		     (auth_mode == WMI_AUTH_OPEN
-		      && roam_req->mdid.mdie_present) ||
+		      && roam_req->mdid.mdie_present &&
+		      roam_req->is_11r_assoc) ||
 			roam_req->is_ese_assoc)) {
 			if (roam_req->is_ese_assoc) {
 				WMITLV_SET_HDR(buf_ptr, WMITLV_TAG_ARRAY_STRUC,
@@ -4835,7 +4839,8 @@ QDF_STATUS send_roam_scan_offload_mode_cmd_tlv(wmi_unified_t wmi_handle,
 			} else if (auth_mode == WMI_AUTH_FT_RSNA
 				   || auth_mode == WMI_AUTH_FT_RSNA_PSK
 				   || (auth_mode == WMI_AUTH_OPEN
-				       && roam_req->mdid.mdie_present)) {
+				       && roam_req->mdid.mdie_present &&
+				       roam_req->is_11r_assoc)) {
 				WMITLV_SET_HDR(buf_ptr, WMITLV_TAG_ARRAY_STRUC,
 					       0);
 				buf_ptr += WMI_TLV_HDR_SIZE;
@@ -9389,7 +9394,7 @@ QDF_STATUS send_stats_ext_req_cmd_tlv(wmi_unified_t wmi_handle,
 	QDF_STATUS ret;
 	wmi_req_stats_ext_cmd_fixed_param *cmd;
 	wmi_buf_t buf;
-	uint16_t len;
+	size_t len;
 	uint8_t *buf_ptr;
 
 	len = sizeof(*cmd) + WMI_TLV_HDR_SIZE + preq->request_data_len;
@@ -9690,6 +9695,18 @@ QDF_STATUS send_nan_req_cmd_tlv(wmi_unified_t wmi_handle,
 	nan_data_len = nan_req->request_data_len;
 	nan_data_len_aligned = roundup(nan_req->request_data_len,
 				       sizeof(uint32_t));
+	if (nan_data_len_aligned < nan_req->request_data_len) {
+		WMI_LOGE("%s: integer overflow while rounding up data_len",
+			 __func__);
+		return QDF_STATUS_E_FAILURE;
+	}
+
+	if (nan_data_len_aligned > WMI_SVC_MSG_MAX_SIZE - WMI_TLV_HDR_SIZE) {
+		WMI_LOGE("%s: wmi_max_msg_size overflow for given datalen",
+			 __func__);
+		return QDF_STATUS_E_FAILURE;
+	}
+
 	len += WMI_TLV_HDR_SIZE + nan_data_len_aligned;
 	buf = wmi_buf_alloc(wmi_handle, len);
 	if (!buf) {
@@ -11337,8 +11354,8 @@ QDF_STATUS send_enable_arp_ns_offload_cmd_tlv(wmi_unified_t wmi_handle,
 	return QDF_STATUS_SUCCESS;
 }
 
-QDF_STATUS send_conf_hw_filter_cmd_tlv(wmi_unified_t wmi, uint8_t vdev_id,
-				       uint8_t mode_bitmap)
+QDF_STATUS send_conf_hw_filter_cmd_tlv(wmi_unified_t wmi,
+				       struct wmi_hw_filter_req_params *req)
 {
 	QDF_STATUS status;
 	wmi_hw_data_filter_cmd_fixed_param *cmd;
@@ -11354,11 +11371,12 @@ QDF_STATUS send_conf_hw_filter_cmd_tlv(wmi_unified_t wmi, uint8_t vdev_id,
 	WMITLV_SET_HDR(&cmd->tlv_header,
 		  WMITLV_TAG_STRUC_wmi_hw_data_filter_cmd_fixed_param,
 		  WMITLV_GET_STRUCT_TLVLEN(wmi_hw_data_filter_cmd_fixed_param));
-	cmd->vdev_id = vdev_id;
-	cmd->enable = mode_bitmap != 0;
-	cmd->hw_filter_bitmap = mode_bitmap;
+	cmd->vdev_id = req->vdev_id;
+	cmd->enable = req->enable;
+	cmd->hw_filter_bitmap = req->mode_bitmap;
 
-	WMI_LOGD("conf hw filter vdev_id: %d, mode: %u", vdev_id, mode_bitmap);
+	WMI_LOGD("conf hw filter vdev_id: %d, mode: %u", req->vdev_id,
+							req->mode_bitmap);
 	status = wmi_unified_cmd_send(wmi, wmi_buf, sizeof(*cmd),
 				      WMI_HW_DATA_FILTER_CMDID);
 	if (QDF_IS_STATUS_ERROR(status)) {
@@ -12085,6 +12103,16 @@ error:
 
 	return status;
 }
+
+/**
+ * send_set_arp_stats_req_cmd_tlv() - set connectivity stats command
+ * @wmi_handle: wmi handle
+ * @req_buf: connecitivity stats
+ *
+ * Set connectivity stats.
+ *
+ * Return: QDF status
+ */
 QDF_STATUS send_set_arp_stats_req_cmd_tlv(wmi_unified_t wmi_handle,
 					  struct set_arp_stats *req_buf)
 {
@@ -12095,6 +12123,10 @@ QDF_STATUS send_set_arp_stats_req_cmd_tlv(wmi_unified_t wmi_handle,
 	wmi_vdev_set_arp_stats_cmd_fixed_param *wmi_set_arp;
 
 	len = sizeof(wmi_vdev_set_arp_stats_cmd_fixed_param);
+	if (req_buf->pkt_type_bitmap) {
+		len += WMI_TLV_HDR_SIZE;
+		len += sizeof(wmi_vdev_set_connectivity_check_stats);
+	}
 	buf = wmi_buf_alloc(wmi_handle, len);
 	if (!buf) {
 		WMI_LOGE("%s : wmi_buf_alloc failed", __func__);
@@ -12109,14 +12141,47 @@ QDF_STATUS send_set_arp_stats_req_cmd_tlv(wmi_unified_t wmi_handle,
 		       WMITLV_GET_STRUCT_TLVLEN
 		       (wmi_vdev_set_arp_stats_cmd_fixed_param));
 
-	/* fill in per roam config values */
 	wmi_set_arp->vdev_id = req_buf->vdev_id;
 
 	wmi_set_arp->set_clr = req_buf->flag;
 	wmi_set_arp->pkt_type = req_buf->pkt_type;
 	wmi_set_arp->ipv4 = req_buf->ip_addr;
 
-	/* Send per roam config parameters */
+	WMI_LOGD("NUD Stats: vdev_id %u set_clr %u pkt_type:%u ipv4 %u",
+		 wmi_set_arp->vdev_id, wmi_set_arp->set_clr,
+		 wmi_set_arp->pkt_type, wmi_set_arp->ipv4);
+
+	/*
+	 * pkt_type_bitmap should be non-zero to ensure
+	 * presence of additional stats.
+	 */
+	if (req_buf->pkt_type_bitmap) {
+		wmi_vdev_set_connectivity_check_stats *wmi_set_connect_stats;
+
+		buf_ptr += sizeof(wmi_vdev_set_arp_stats_cmd_fixed_param);
+		WMITLV_SET_HDR(buf_ptr,
+		       WMITLV_TAG_ARRAY_STRUC,
+		       sizeof(wmi_vdev_set_connectivity_check_stats));
+		buf_ptr += WMI_TLV_HDR_SIZE;
+		wmi_set_connect_stats =
+			(wmi_vdev_set_connectivity_check_stats *)buf_ptr;
+		WMITLV_SET_HDR(&wmi_set_connect_stats->tlv_header,
+		    WMITLV_TAG_STRUC_wmi_vdev_set_connectivity_check_stats,
+		    WMITLV_GET_STRUCT_TLVLEN(
+					wmi_vdev_set_connectivity_check_stats));
+		wmi_set_connect_stats->pkt_type_bitmap =
+						req_buf->pkt_type_bitmap;
+		wmi_set_connect_stats->tcp_src_port = req_buf->tcp_src_port;
+		wmi_set_connect_stats->tcp_dst_port = req_buf->tcp_dst_port;
+		wmi_set_connect_stats->icmp_ipv4 = req_buf->icmp_ipv4;
+
+		WMI_LOGD("Connectivity Stats: pkt_type_bitmap %u tcp_src_port:%u tcp_dst_port %u icmp_ipv4 %u",
+			 wmi_set_connect_stats->pkt_type_bitmap,
+			 wmi_set_connect_stats->tcp_src_port,
+			 wmi_set_connect_stats->tcp_dst_port,
+			 wmi_set_connect_stats->icmp_ipv4);
+	}
+
 	status = wmi_unified_cmd_send(wmi_handle, buf,
 				      len, WMI_VDEV_SET_ARP_STAT_CMDID);
 	if (QDF_IS_STATUS_ERROR(status)) {
