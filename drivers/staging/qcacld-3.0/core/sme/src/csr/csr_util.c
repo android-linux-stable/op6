@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011-2017 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2011-2018 The Linux Foundation. All rights reserved.
  *
  * Previously licensed under the ISC license by Qualcomm Atheros, Inc.
  *
@@ -1373,6 +1373,7 @@ QDF_STATUS csr_get_parsed_bss_description_ies(tHalHandle hHal,
 			if (!QDF_IS_STATUS_SUCCESS(status)) {
 				qdf_mem_free(*ppIEStruct);
 				*ppIEStruct = NULL;
+				sme_debug("parse bss description ies failed");
 			}
 		} else {
 			sme_err("failed to allocate memory");
@@ -2350,17 +2351,20 @@ QDF_STATUS csr_validate_mcc_beacon_interval(tpAniSirGlobal mac_ctx,
 
 /**
  * csr_is_auth_type11r() - Check if Authentication type is 11R
+ * @mac: pointer to mac context
  * @auth_type: The authentication type that is used to make the connection
  * @mdie_present: Is MDIE IE present
  *
  * Return: true if is 11R auth type, false otherwise
  */
-bool csr_is_auth_type11r(eCsrAuthType auth_type, uint8_t mdie_present)
+bool csr_is_auth_type11r(tpAniSirGlobal mac, eCsrAuthType auth_type,
+			 uint8_t mdie_present)
 {
 	switch (auth_type) {
 	case eCSR_AUTH_TYPE_OPEN_SYSTEM:
-		if (mdie_present)
-			return true;
+		if (mdie_present &&
+		    mac->roam.configParam.enable_ftopen)
+		return true;
 		break;
 	case eCSR_AUTH_TYPE_FT_RSN_PSK:
 	case eCSR_AUTH_TYPE_FT_RSN:
@@ -2372,16 +2376,12 @@ bool csr_is_auth_type11r(eCsrAuthType auth_type, uint8_t mdie_present)
 }
 
 /* Function to return true if the profile is 11r */
-bool csr_is_profile11r(tCsrRoamProfile *pProfile)
+bool csr_is_profile11r(tpAniSirGlobal mac, tCsrRoamProfile *pProfile)
 {
-	return csr_is_auth_type11r(pProfile->negotiatedAuthType,
+	return csr_is_auth_type11r(mac, pProfile->negotiatedAuthType,
 				   pProfile->MDID.mdiePresent);
 }
 
-
-#ifdef FEATURE_WLAN_ESE
-
-/* Function to return true if the authtype is ESE */
 bool csr_is_auth_type_ese(eCsrAuthType AuthType)
 {
 	switch (AuthType) {
@@ -2393,6 +2393,8 @@ bool csr_is_auth_type_ese(eCsrAuthType AuthType)
 	}
 	return false;
 }
+
+#ifdef FEATURE_WLAN_ESE
 
 /* Function to return true if the profile is ESE */
 bool csr_is_profile_ese(tCsrRoamProfile *pProfile)

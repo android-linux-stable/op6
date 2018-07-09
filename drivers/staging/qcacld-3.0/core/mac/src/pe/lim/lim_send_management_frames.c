@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011-2017 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2011-2018 The Linux Foundation. All rights reserved.
  *
  * Previously licensed under the ISC license by Qualcomm Atheros, Inc.
  *
@@ -227,6 +227,7 @@ lim_send_probe_req_mgmt_frame(tpAniSirGlobal mac_ctx,
 	bool extracted_ext_cap_flag = false;
 	tDot11fIEExtCap extracted_ext_cap;
 	tSirRetStatus sir_status;
+	uint8_t *qcn_ie = NULL;
 
 	/* The probe req should not send 11ac capabilieties if band is 2.4GHz,
 	 * unless enableVhtFor24GHz is enabled in INI. So if enableVhtFor24GHz
@@ -347,9 +348,6 @@ lim_send_probe_req_mgmt_frame(tpAniSirGlobal mac_ctx,
 		populate_dot11f_ext_cap(mac_ctx, is_vht_enabled, &pr.ExtCap,
 			pesession);
 
-	if (mac_ctx->roam.configParam.qcn_ie_support)
-		populate_dot11f_qcn_ie(&pr.QCN_IE);
-
 	if (addn_ielen) {
 		qdf_mem_zero((uint8_t *)&extracted_ext_cap,
 			sizeof(tDot11fIEExtCap));
@@ -371,7 +369,13 @@ lim_send_probe_req_mgmt_frame(tpAniSirGlobal mac_ctx,
 			extracted_ext_cap_flag =
 				(extracted_ext_cap.num_bytes > 0);
 		}
+		qcn_ie = cfg_get_vendor_ie_ptr_from_oui(mac_ctx,
+				SIR_MAC_QCN_OUI_TYPE, SIR_MAC_QCN_OUI_TYPE_SIZE,
+				additional_ie, addn_ielen);
 	}
+	/* Add qcn_ie only if qcn ie is not present in additional_ie */
+	if (mac_ctx->roam.configParam.qcn_ie_support && !qcn_ie)
+		populate_dot11f_qcn_ie(&pr.QCN_IE);
 
 	/*
 	 * Extcap IE now support variable length, merge Extcap IE from addn_ie
@@ -1603,6 +1607,7 @@ lim_send_assoc_req_mgmt_frame(tpAniSirGlobal mac_ctx,
 			      tLimMlmAssocReq *mlm_assoc_req,
 			      tpPESession pe_session)
 {
+	int ret;
 	tDot11fAssocRequest *frm;
 	uint16_t caps;
 	uint8_t *frame;
@@ -1913,9 +1918,14 @@ lim_send_assoc_req_mgmt_frame(tpAniSirGlobal mac_ctx,
 	 * before packing the frm structure. In this way, the IE ordering
 	 * which the latest 802.11 spec mandates is maintained.
 	 */
-	if (add_ie_len)
-		dot11f_unpack_assoc_request(mac_ctx, add_ie,
+	if (add_ie_len) {
+		ret = dot11f_unpack_assoc_request(mac_ctx, add_ie,
 					    add_ie_len, frm, true);
+		if (DOT11F_FAILED(ret)) {
+			pe_err("unpack failed, ret: 0x%x", ret);
+			goto end;
+		}
+	}
 
 	status = dot11f_get_packed_assoc_request_size(mac_ctx, frm, &payload);
 	if (DOT11F_FAILED(status)) {
@@ -1945,8 +1955,6 @@ lim_send_assoc_req_mgmt_frame(tpAniSirGlobal mac_ctx,
 		assoc_cnf.sessionId = pe_session->peSessionId;
 
 		assoc_cnf.resultCode = eSIR_SME_RESOURCES_UNAVAILABLE;
-
-		cds_packet_free((void *)packet);
 
 		lim_post_sme_message(mac_ctx, LIM_MLM_ASSOC_CNF,
 			(uint32_t *) &assoc_cnf);
@@ -3467,6 +3475,7 @@ lim_send_extended_chan_switch_action_frame(tpAniSirGlobal mac_ctx,
 		uint8_t new_channel, uint8_t count, tpPESession session_entry)
 {
 	tDot11fext_channel_switch_action_frame frm;
+	tLimWiderBWChannelSwitchInfo *wide_bw_ie;
 	uint8_t                  *frame;
 	tpSirMacMgmtHdr          mac_hdr;
 	uint32_t                 num_bytes, n_payload, status;
@@ -3474,6 +3483,7 @@ lim_send_extended_chan_switch_action_frame(tpAniSirGlobal mac_ctx,
 	QDF_STATUS               qdf_status;
 	uint8_t                  txFlag = 0;
 	uint8_t                  sme_session_id = 0;
+	uint8_t                  ch_spacing;
 
 	if (session_entry == NULL) {
 		pe_err("Session entry is NULL!!!");
@@ -3492,6 +3502,25 @@ lim_send_extended_chan_switch_action_frame(tpAniSirGlobal mac_ctx,
 	frm.ext_chan_switch_ann_action.new_channel = new_channel;
 	frm.ext_chan_switch_ann_action.switch_count = count;
 
+	ch_spacing = cds_reg_dmn_get_chanwidth_from_opclass(
+			mac_ctx->scan.countryCodeCurrent, new_channel,
+			new_op_class);
+	pe_debug("wrapper: ch_spacing %hu", ch_spacing);
+
+	if ((ch_spacing == 80) || (ch_spacing == 160)) {
+		wide_bw_ie = &session_entry->gLimWiderBWChannelSwitch;
+		frm.WiderBWChanSwitchAnn.newChanWidth =
+			wide_bw_ie->newChanWidth;
+		frm.WiderBWChanSwitchAnn.newCenterChanFreq0 =
+			wide_bw_ie->newCenterChanFreq0;
+		frm.WiderBWChanSwitchAnn.newCenterChanFreq1 =
+			wide_bw_ie->newCenterChanFreq1;
+		frm.WiderBWChanSwitchAnn.present = 1;
+		pe_debug("wrapper: width:%d f0:%d f1:%d",
+			 frm.WiderBWChanSwitchAnn.newChanWidth,
+			 frm.WiderBWChanSwitchAnn.newCenterChanFreq0,
+			 frm.WiderBWChanSwitchAnn.newCenterChanFreq1);
+	}
 
 	status = dot11f_get_packed_ext_channel_switch_action_frame_size(mac_ctx,
 							    &frm, &n_payload);

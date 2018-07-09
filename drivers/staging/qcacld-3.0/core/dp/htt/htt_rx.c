@@ -164,7 +164,7 @@ static void htt_rx_hash_deinit(struct htt_pdev_t *pdev)
 
 	if (qdf_mem_smmu_s1_enabled(pdev->osdev) && pdev->is_ipa_uc_enabled) {
 		mem_map_table = qdf_mem_map_table_alloc(
-					pdev->rx_ring.fill_level);
+					RX_NUM_HASH_BUCKETS * RX_ENTRIES_SIZE);
 		if (!mem_map_table) {
 			qdf_print("%s: Failed to allocate memory for mem map table\n",
 				  __func__);
@@ -500,6 +500,15 @@ static int htt_rx_ring_fill_n(struct htt_pdev_t *pdev, int num)
 	int num_alloc = 0;
 
 	idx = *(pdev->rx_ring.alloc_idx.vaddr);
+
+	if ((idx < 0) || (idx > pdev->rx_ring.size_mask) ||
+	    (num > pdev->rx_ring.size))  {
+		QDF_TRACE(QDF_MODULE_ID_HTT,
+			  QDF_TRACE_LEVEL_ERROR,
+			  "%s:rx refill failed!", __func__);
+		return filled;
+	}
+
 	if (qdf_mem_smmu_s1_enabled(pdev->osdev) && pdev->is_ipa_uc_enabled) {
 		mem_map_table = qdf_mem_map_table_alloc(num);
 		if (!mem_map_table) {
@@ -1851,7 +1860,7 @@ static unsigned char htt_rx_get_rate(uint32_t l_sig_rate_select,
 					uint32_t l_sig_rate, uint8_t *preamble)
 {
 	char ret = 0x0;
-	*preamble = LONG_PREAMBLE;
+	*preamble = SHORT_PREAMBLE;
 	if (l_sig_rate_select == 0) {
 		switch (l_sig_rate) {
 		case 0x8:
@@ -1901,14 +1910,12 @@ static unsigned char htt_rx_get_rate(uint32_t l_sig_rate_select,
 			break;
 		case 0x5:
 			ret = 0x4;
-			*preamble = SHORT_PREAMBLE;
 			break;
 		case 0x6:
 			ret = 0xB;
 			break;
 		case 0x7:
 			ret = 0x16;
-			*preamble = SHORT_PREAMBLE;
 			break;
 		default:
 			break;

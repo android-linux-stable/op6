@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2013-2017 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2013-2018 The Linux Foundation. All rights reserved.
  *
  * Previously licensed under the ISC license by Qualcomm Atheros, Inc.
  *
@@ -45,6 +45,10 @@
 #define HDD_ETHERTYPE_802_1_X_FRAME_OFFSET 12
 #ifdef FEATURE_WLAN_WAPI
 #define HDD_ETHERTYPE_WAI                  0x88b4
+#define IS_HDD_ETHERTYPE_WAI(_skb) (ntohs(_skb->protocol) == \
+					HDD_ETHERTYPE_WAI)
+#else
+#define IS_HDD_ETHERTYPE_WAI(_skb) (false)
 #endif
 
 #define HDD_PSB_CFG_INVALID                   0xFF
@@ -60,6 +64,27 @@ void hdd_tx_timeout(struct net_device *dev);
 QDF_STATUS hdd_init_tx_rx(hdd_adapter_t *pAdapter);
 QDF_STATUS hdd_deinit_tx_rx(hdd_adapter_t *pAdapter);
 QDF_STATUS hdd_rx_packet_cbk(void *context, qdf_nbuf_t rxBuf);
+
+/**
+ * hdd_reset_all_adapters_connectivity_stats() - reset connectivity stats
+ * @hdd_ctx: pointer to HDD Station Context
+ *
+ * Return: None
+ */
+void hdd_reset_all_adapters_connectivity_stats(hdd_context_t *hdd_ctx);
+
+/**
+ * hdd_tx_rx_collect_connectivity_stats_info() - collect connectivity stats
+ * @skb: pointer to skb data
+ * @adapter: pointer to vdev apdapter
+ * @action: action done on pkt.
+ * @pkt_type: data pkt type
+ *
+ * Return: None
+ */
+void hdd_tx_rx_collect_connectivity_stats_info(struct sk_buff *skb,
+		void *adapter, enum connectivity_stats_pkt_status action,
+		uint8_t *pkt_type);
 
 /**
  * hdd_rx_ol_init() - Initialize Rx mode(LRO or GRO) method
