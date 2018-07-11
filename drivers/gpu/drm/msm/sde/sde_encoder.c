@@ -4853,33 +4853,6 @@ int sde_encoder_update_caps_for_cont_splash(struct drm_encoder *encoder)
 
 int sde_encoder_display_failure_notification(struct drm_encoder *enc)
 {
-	struct msm_drm_thread *disp_thread = NULL;
-	struct msm_drm_private *priv = NULL;
-	struct sde_encoder_virt *sde_enc = NULL;
-
-	if (!enc || !enc->dev || !enc->dev->dev_private) {
-		SDE_ERROR("invalid parameters\n");
-		return -EINVAL;
-	}
-
-	priv = enc->dev->dev_private;
-	sde_enc = to_sde_encoder_virt(enc);
-	if (!sde_enc->crtc || (sde_enc->crtc->index
-			>= ARRAY_SIZE(priv->disp_thread))) {
-		SDE_DEBUG_ENC(sde_enc,
-			"invalid cached CRTC: %d or crtc index: %d\n",
-			sde_enc->crtc == NULL,
-			sde_enc->crtc ? sde_enc->crtc->index : -EINVAL);
-		return -EINVAL;
-	}
-
-	SDE_EVT32_VERBOSE(DRMID(enc));
-
-	disp_thread = &priv->disp_thread[sde_enc->crtc->index];
-
-	kthread_queue_work(&disp_thread->worker,
-				&sde_enc->esd_trigger_work);
-	kthread_flush_work(&sde_enc->esd_trigger_work);
 	/**
 	 * panel may stop generating te signal (vsync) during esd failure. rsc
 	 * hardware may hang without vsync. Avoid rsc hang by generating the

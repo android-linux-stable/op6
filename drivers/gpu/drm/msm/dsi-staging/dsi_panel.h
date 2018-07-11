@@ -302,6 +302,7 @@ void dsi_dsc_pclk_param_calc(struct msm_display_dsc_info *dsc, int intf_width);
 
 int dsi_panel_parse_esd_reg_read_configs(struct dsi_panel *panel,
 				struct device_node *of_node);
+
 int dsi_panel_set_acl_mode(struct dsi_panel *panel, int level);
 int dsi_panel_set_hbm_mode(struct dsi_panel *panel, int level);
 int dsi_panel_set_aod_mode(struct dsi_panel *panel, int level);

@@ -135,7 +135,6 @@ struct dsi_display_clk_info {
  * @disp_te_gpio:     GPIO for panel TE interrupt.
  * @is_te_irq_enabled:bool to specify whether TE interrupt is enabled.
  * @esd_te_gate:      completion gate to signal TE interrupt.
- * @te_irq_triggered: atomic state notifying panel TE interrupt.
  * @ctrl_count:       Number of DSI interfaces required by panel.
  * @ctrl:             Controller information for DSI display.
  * @panel:            Handle to DSI panel.
@@ -182,8 +181,6 @@ struct dsi_display {
 	int disp_te_gpio;
 	bool is_te_irq_enabled;
 	struct completion esd_te_gate;
-	atomic_t te_irq_triggered;
-	struct completion te_done;
 
 	u32 ctrl_count;
 	struct dsi_display_ctrl ctrl[MAX_DSI_CTRLS_PER_DISPLAY];

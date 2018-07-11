@@ -1116,7 +1116,7 @@ error:
 
 }
 
-int dsi_display_link_clk_force_reenable_ctrl(void *handle)
+int dsi_display_link_clk_force_update_ctrl(void *handle)
 {
 	int rc = 0;
 
@@ -1132,24 +1132,6 @@ int dsi_display_link_clk_force_reenable_ctrl(void *handle)
 	mutex_unlock(&dsi_mngr_clk_mutex);
 
 	return rc;
-}
-
-int dsi_display_link_clk_force_update_ctrl(void *handle)
-{
-        int rc = 0;
-
-        if (!handle) {
-                pr_err("%s: Invalid arg\n", __func__);
-                return -EINVAL;
-        }
-
-        mutex_lock(&dsi_mngr_clk_mutex);
-
-        rc = dsi_display_link_clk_force_update(handle);
-
-        mutex_unlock(&dsi_mngr_clk_mutex);
-
-        return rc;
 }
 
 int dsi_display_clk_ctrl(void *handle,
