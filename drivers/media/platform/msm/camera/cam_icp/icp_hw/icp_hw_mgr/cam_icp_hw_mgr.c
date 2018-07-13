@@ -2916,8 +2916,8 @@ static int cam_icp_mgr_config_hw(void *hw_mgr_priv, void *config_hw_args)
 
 	req_id = *(uint64_t *)config_args->priv;
 	idx = cam_icp_clk_idx_from_req_id(ctx_data, req_id);
-	ctx_data->hfi_frame_process.fw_process_flag[idx] = true;
 	cam_icp_mgr_ipe_bps_clk_update(hw_mgr, ctx_data, idx);
+	ctx_data->hfi_frame_process.fw_process_flag[idx] = true;
 
 	rc = cam_icp_mgr_enqueue_config(hw_mgr, config_args);
 	if (rc)
