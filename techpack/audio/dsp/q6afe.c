@@ -1771,7 +1771,7 @@ static struct cal_block_data *afe_find_cal(int cal_index, int port_id)
 			goto exit;
 		}
 	}
-	pr_err("%s: no matching cal_block found\n", __func__);
+	pr_debug("%s: no matching cal_block found\n", __func__);
 	cal_block = NULL;
 
 exit:
@@ -6436,6 +6436,7 @@ int q6afe_check_osr_clk_freq(u32 freq)
 
 	switch (freq) {
 	case Q6AFE_LPASS_OSR_CLK_12_P288_MHZ:
+	case Q6AFE_LPASS_OSR_CLK_9_P600_MHZ:
 	case Q6AFE_LPASS_OSR_CLK_8_P192_MHZ:
 	case Q6AFE_LPASS_OSR_CLK_6_P144_MHZ:
 	case Q6AFE_LPASS_OSR_CLK_4_P096_MHZ:

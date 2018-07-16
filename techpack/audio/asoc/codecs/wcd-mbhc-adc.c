@@ -34,6 +34,7 @@
 #define WCD_MBHC_ADC_HS_THRESHOLD_MV    1800
 #define WCD_MBHC_ADC_HPH_THRESHOLD_MV   75
 #define WCD_MBHC_ADC_MICBIAS_MV         2700
+#define WCD_MBHC_FAKE_INS_RETRY         4
 
 static int wcd_mbhc_get_micbias(struct wcd_mbhc *mbhc)
 {
@@ -350,6 +351,42 @@ done:
 	return (plug_type == MBHC_PLUG_TYPE_GND_MIC_SWAP) ? true : false;
 }
 
+static int wcd_mbhc_adc_get_hs_thres(struct wcd_mbhc *mbhc)
+{
+	int hs_threshold, micbias_mv;
+
+	micbias_mv = wcd_mbhc_get_micbias(mbhc);
+	if (mbhc->hs_thr) {
+		if (mbhc->micb_mv == micbias_mv)
+			hs_threshold = mbhc->hs_thr;
+		else
+			hs_threshold = (mbhc->hs_thr *
+				micbias_mv) / mbhc->micb_mv;
+	} else {
+		hs_threshold = ((WCD_MBHC_ADC_HS_THRESHOLD_MV *
+			micbias_mv) / WCD_MBHC_ADC_MICBIAS_MV);
+	}
+	return hs_threshold;
+}
+
+static int wcd_mbhc_adc_get_hph_thres(struct wcd_mbhc *mbhc)
+{
+	int hph_threshold, micbias_mv;
+
+	micbias_mv = wcd_mbhc_get_micbias(mbhc);
+	if (mbhc->hph_thr) {
+		if (mbhc->micb_mv == micbias_mv)
+			hph_threshold = mbhc->hph_thr;
+		else
+			hph_threshold = (mbhc->hph_thr *
+				micbias_mv) / mbhc->micb_mv;
+	} else {
+		hph_threshold = ((WCD_MBHC_ADC_HPH_THRESHOLD_MV *
+			micbias_mv) / WCD_MBHC_ADC_MICBIAS_MV);
+	}
+	return hph_threshold;
+}
+
 static bool wcd_mbhc_adc_check_for_spl_headset(struct wcd_mbhc *mbhc,
 					   int *spl_hs_cnt)
 {
@@ -592,15 +629,8 @@ static int wcd_mbhc_get_plug_from_adc(struct wcd_mbhc *mbhc, int adc_result)
 	enum wcd_mbhc_plug_type plug_type = MBHC_PLUG_TYPE_INVALID;
 	u32 hph_thr = 0, hs_thr = 0;
 
-	if (mbhc->hs_thr)
-		hs_thr = mbhc->hs_thr;
-	else
-		hs_thr = WCD_MBHC_ADC_HS_THRESHOLD_MV;
-
-	if (mbhc->hph_thr)
-		hph_thr = mbhc->hph_thr;
-	else
-		hph_thr = WCD_MBHC_ADC_HPH_THRESHOLD_MV;
+	hs_thr = wcd_mbhc_adc_get_hs_thres(mbhc);
+	hph_thr = wcd_mbhc_adc_get_hph_thres(mbhc);
 
 	if (adc_result < hph_thr)
 		plug_type = MBHC_PLUG_TYPE_HEADPHONE;
@@ -647,6 +677,9 @@ static void wcd_correct_swch_plug(struct work_struct *work)
 	} else
 		hs_threshold = ((WCD_MBHC_ADC_HS_THRESHOLD_MV *
 			micbias_mv) / WCD_MBHC_ADC_MICBIAS_MV);
+
+	micbias_mv = wcd_mbhc_get_micbias(mbhc);
+	hs_threshold = wcd_mbhc_adc_get_hs_thres(mbhc);
 
 	WCD_MBHC_RSC_LOCK(mbhc);
 	/* Mask ADC COMPLETE interrupt */
@@ -728,10 +761,11 @@ correct_plug_type:
 		    (spl_hs_count < WCD_MBHC_SPL_HS_CNT)) {
 			spl_hs = wcd_mbhc_adc_check_for_spl_headset(mbhc,
 								&spl_hs_count);
+			output_mv = wcd_measure_adc_once(mbhc, MUX_CTL_IN2P);
 
 			if (spl_hs_count == WCD_MBHC_SPL_HS_CNT) {
 				hs_threshold = (hs_threshold *
-					wcd_mbhc_get_micbias(mbhc)) / micbias_mv;
+				     wcd_mbhc_get_micbias(mbhc)) / micbias_mv;
 				spl_hs = true;
 				mbhc->micbias_enable = true;
 			}
@@ -959,9 +993,8 @@ static irqreturn_t wcd_mbhc_adc_hs_rem_irq(int irq, void *data)
 
 	timeout = jiffies +
 		  msecs_to_jiffies(WCD_FAKE_REMOVAL_MIN_PERIOD_MS);
-	adc_threshold = ((WCD_MBHC_ADC_HS_THRESHOLD_MV *
-			  wcd_mbhc_get_micbias(mbhc)) /
-			  WCD_MBHC_ADC_MICBIAS_MV);
+	adc_threshold = wcd_mbhc_adc_get_hs_thres(mbhc);
+
 	do {
 		retry++;
 		/*
@@ -1032,6 +1065,7 @@ static irqreturn_t wcd_mbhc_adc_hs_rem_irq(int irq, void *data)
 		WCD_MBHC_REG_UPDATE_BITS(WCD_MBHC_ADC_MODE, 0);
 		WCD_MBHC_REG_UPDATE_BITS(WCD_MBHC_ADC_EN, 0);
 		wcd_mbhc_elec_hs_report_unplug(mbhc);
+		WCD_MBHC_REG_UPDATE_BITS(WCD_MBHC_BTN_ISRC_CTL, 0);
 
 		if (hphpa_on) {
 			hphpa_on = false;
@@ -1048,8 +1082,8 @@ exit:
 static irqreturn_t wcd_mbhc_adc_hs_ins_irq(int irq, void *data)
 {
 	struct wcd_mbhc *mbhc = data;
-	u8 state = 0;
-	u8 retry = 4;
+	u8 clamp_state = 0;
+	u8 clamp_retry = WCD_MBHC_FAKE_INS_RETRY;
 
 	pr_debug("%s: enter\n", __func__);
 
@@ -1065,13 +1099,17 @@ static irqreturn_t wcd_mbhc_adc_hs_ins_irq(int irq, void *data)
 	}
 
 	do {
-		WCD_MBHC_REG_READ(WCD_MBHC_IN2P_CLAMP_STATE, state);
-		if (state) {
+		WCD_MBHC_REG_READ(WCD_MBHC_IN2P_CLAMP_STATE, clamp_state);
+		if (clamp_state) {
 			pr_debug("%s: fake insertion irq, leave\n", __func__);
 			return IRQ_HANDLED;
 		}
+		/*
+		 * check clamp for 120ms but at 30ms chunks to leave
+		 * room for other interrupts to be processed
+		 */
 		usleep_range(30000, 30100);
-	} while (--retry);
+	} while (--clamp_retry);
 
 	WCD_MBHC_RSC_LOCK(mbhc);
 	/*
