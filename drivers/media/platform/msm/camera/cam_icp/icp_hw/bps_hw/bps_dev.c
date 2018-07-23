@@ -187,6 +187,7 @@ static struct platform_driver cam_bps_driver = {
 		.name = "cam-bps",
 		.owner = THIS_MODULE,
 		.of_match_table = cam_bps_dt_match,
+		.suppress_bind_attrs = true,
 	},
 };
 
