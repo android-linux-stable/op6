@@ -681,6 +681,9 @@ static void wcd_correct_swch_plug(struct work_struct *work)
 	micbias_mv = wcd_mbhc_get_micbias(mbhc);
 	hs_threshold = wcd_mbhc_adc_get_hs_thres(mbhc);
 
+	micbias_mv = wcd_mbhc_get_micbias(mbhc);
+	hs_threshold = wcd_mbhc_adc_get_hs_thres(mbhc);
+
 	WCD_MBHC_RSC_LOCK(mbhc);
 	/* Mask ADC COMPLETE interrupt */
 	wcd_mbhc_hs_elec_irq(mbhc, WCD_MBHC_ELEC_HS_INS, false);
