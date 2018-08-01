@@ -692,8 +692,8 @@ struct sk_buff {
 				fclone:2,
 				peeked:1,
 				head_frag:1,
-				xmit_more:1,
-				pfmemalloc:1;
+				xmit_more:1;
+	/* one bit hole */
 	kmemcheck_bitfield_end(flags1);
 
 	/* fields enclosed in headers_start/headers_end are copied
@@ -713,6 +713,7 @@ struct sk_buff {
 
 	__u8			__pkt_type_offset[0];
 	__u8			pkt_type:3;
+	__u8			pfmemalloc:1;
 	__u8			ignore_df:1;
 	__u8			nfctinfo:3;
 	__u8			nf_trace:1;
