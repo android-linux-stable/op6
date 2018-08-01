@@ -39,6 +39,7 @@
 #include "csr_link_list.h"
 
 #define CSR_INVALID_SCANRESULT_HANDLE       (NULL)
+#define CSR_NUM_WLM_LATENCY_LEVEL   4
 
 typedef enum {
 	/* never used */
@@ -998,6 +999,7 @@ typedef struct tagCsrRoamProfile {
 	bool force_24ghz_in_ht20;
 	bool supplicant_disabled_roaming;
 	bool roaming_allowed_on_iface;
+	bool driver_disabled_roaming;
 #ifdef WLAN_FEATURE_FILS_SK
 	bool fils_connection;
 	uint8_t *hlp_ie;
@@ -1359,6 +1361,9 @@ typedef struct tagCsrConfigParam {
 	uint32_t num_disallowed_aps;
 	uint32_t scan_probe_repeat_time;
 	uint32_t scan_num_probes;
+	uint16_t wlm_latency_enable;
+	uint16_t wlm_latency_level;
+	uint32_t wlm_latency_flags[CSR_NUM_WLM_LATENCY_LEVEL];
 	struct sir_score_config bss_score_params;
 	uint8_t oce_feature_bitmap;
 	bool enable_ftopen;
