@@ -850,6 +850,17 @@ QDF_STATUS sme_request_ibss_peer_info(tHalHandle hHal, void *pUserData,
 	pIbssPeerInfoCb peerInfoCbk, bool allPeerInfoReqd, uint8_t staIdx);
 QDF_STATUS sme_send_cesium_enable_ind(tHalHandle hHal, uint32_t sessionId);
 
+/**
+ * sme_set_wlm_latency_level_ind() - Used to set the latency level to fw
+ * @hal
+ * @session_id
+ * @latency_level
+ *
+ * Return QDF_STATUS
+ */
+QDF_STATUS sme_set_wlm_latency_level(tHalHandle hal,
+				     uint16_t session_id,
+				     uint16_t latency_level);
 /*
  * SME API to enable/disable idle mode powersave
  * This should be called only if powersave offload
@@ -1101,6 +1112,16 @@ QDF_STATUS sme_wifi_start_logger(tHalHandle hal,
 
 bool sme_neighbor_middle_of_roaming(tHalHandle hHal,
 						uint8_t sessionId);
+
+/*
+ * sme_is_any_session_in_middle_of_roaming() - check if roaming is in progress
+ * @hal: HAL Handle
+ *
+ * Checks if any SME session is in middle of roaming
+ *
+ * Return : true if roaming is in progress else false
+ */
+bool sme_is_any_session_in_middle_of_roaming(tHalHandle hal);
 
 QDF_STATUS sme_enable_uapsd_for_ac(void *cds_ctx, uint8_t sta_id,
 				      sme_ac_enum_type ac, uint8_t tid,
