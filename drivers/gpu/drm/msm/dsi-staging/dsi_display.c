@@ -953,6 +953,7 @@ int dsi_display_set_power(struct drm_connector *connector,
 		rc = dsi_panel_set_nolp(display->panel);
 		if ((power_mode == SDE_MODE_DPMS_ON) && display->panel->aod_status){
 		    dsi_panel_set_aod_mode(display->panel, 0);
+                    rc = dsi_panel_enable(display->panel);
 		} else if ((power_mode == SDE_MODE_DPMS_OFF)
 		        && display->panel->aod_status){
             display->panel->aod_status = 0;
