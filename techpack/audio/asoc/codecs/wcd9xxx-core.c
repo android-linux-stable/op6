@@ -23,6 +23,7 @@
 #include <linux/regmap.h>
 #include <linux/mfd/wcd9xxx/wcd9xxx_registers.h>
 #include <sound/soc.h>
+#include <linux/of_gpio.h>
 #include "core.h"
 #include "pdata.h"
 #include "msm-cdc-pinctrl.h"
@@ -60,6 +61,8 @@
 #define WCD9XXX_PAGE_NUM(reg)    (((reg) >> 8) & 0xff)
 #define WCD9XXX_PAGE_SIZE 256
 
+extern bool fsa4480_enable;
+
 struct wcd9xxx_i2c {
 	struct i2c_client *client;
 	struct i2c_msg xfer_msg[2];
@@ -82,6 +85,11 @@ static struct regmap_config wcd9xxx_i2c_base_regmap_config = {
 
 static u8 wcd9xxx_pgd_la;
 static u8 wcd9xxx_inf_la;
+
+int usb_sw_gpio = -1;
+int hp_sw_gpio = -1;
+int mbhc_sw_gpio = -1;
+int ldo_sw_gpio = -1;
 
 static const int wcd9xxx_cdc_types[] = {
 	[WCD9XXX] = WCD9XXX,
@@ -1217,6 +1225,93 @@ static int wcd9xxx_slim_get_laddr(struct slim_device *sb,
 	return ret;
 }
 
+/*2018/06/14 @bsp add for support notify audio adapter switch*/
+static int cc_audio_adapter_detect_callback(struct notifier_block *nb,
+				unsigned long value, void *data)
+{
+
+	if (value == 1) {
+		pr_err("%s:audio_adapter attached!\n", __func__);
+
+		if (gpio_is_valid(ldo_sw_gpio)) {
+			gpio_set_value_cansleep(ldo_sw_gpio, 1);
+			pr_err("ldo_sw_gpio set to 1\n");
+		} else {
+			pr_err("ldo_sw_gpio gpio_is_valid failed\n");
+		}
+		msleep_interruptible(20);
+
+		if (gpio_is_valid(usb_sw_gpio)) {
+			gpio_set_value_cansleep(usb_sw_gpio, 1);
+			pr_err("usb_sw_gpio set to 1\n");
+		} else {
+			pr_err("usb_sw_gpio gpio_is_valid failed\n");
+		}
+
+		if (gpio_is_valid(mbhc_sw_gpio)) {
+			gpio_set_value_cansleep(mbhc_sw_gpio, 0);
+			pr_err("mbhc_sw_gpio set to 0\n");
+		} else {
+			pr_err("mbhc_sw_gpio gpio_is_valid failed\n");
+		}
+
+	} else if (value == 0) {
+		pr_err("%s:audio_adapter removal!\n", __func__);
+
+		if (gpio_is_valid(mbhc_sw_gpio)) {
+			gpio_set_value_cansleep(mbhc_sw_gpio, 1);
+			pr_err("mbhc_sw_gpio set to 1\n");
+		} else {
+			pr_err("mbhc_sw_gpio gpio_is_valid failed\n");
+		}
+
+		if (gpio_is_valid(usb_sw_gpio)) {
+			gpio_set_value_cansleep(usb_sw_gpio, 0);
+		} else {
+			pr_err("usb_sw_gpio gpio_is_valid failed\n");
+		}
+
+		if (gpio_is_valid(ldo_sw_gpio)) {
+			gpio_set_value_cansleep(ldo_sw_gpio, 0);
+			pr_err("ldo_sw_gpio set to 0\n");
+		} else {
+			pr_err("ldo_sw_gpio gpio_is_valid failed\n");
+		}
+
+	} else
+		pr_err("%s:audio adapter value = %lu\n", __func__, value);
+
+	return NOTIFY_OK;
+}
+
+static struct notifier_block typec_cc_notifier = {
+	.notifier_call = cc_audio_adapter_detect_callback,
+};
+
+//suzhiguang,for usb sw/hp sw control
+void setUsbSwGpioPin(int value)
+{
+	if (gpio_is_valid(usb_sw_gpio)) {
+		gpio_set_value_cansleep(usb_sw_gpio, value);
+		pr_err("%s usb_sw_gpio set to %d\n", __func__, value);
+	} else {
+		pr_err("%s usb_sw_gpio gpio_is_valid failed\n", __func__);
+	}
+}
+EXPORT_SYMBOL(setUsbSwGpioPin);
+
+void setHpSwGpioPin(int value)
+{
+	if (gpio_is_valid(hp_sw_gpio)) {
+		gpio_set_value_cansleep(hp_sw_gpio, value);
+		pr_err("%s hp_sw_gpio set to %d\n", __func__, value);
+	} else {
+		pr_err("%s hp_sw_gpio gpio_is_valid failed\n", __func__);
+	}
+}
+EXPORT_SYMBOL(setHpSwGpioPin);
+
+
 static int wcd9xxx_slim_probe(struct slim_device *slim)
 {
 	struct wcd9xxx *wcd9xxx;
@@ -1224,7 +1319,8 @@ static int wcd9xxx_slim_probe(struct slim_device *slim)
 	const struct slim_device_id *device_id;
 	int ret = 0;
 	int intf_type;
-
+//suzhiguang,add for parse dt.
+	struct device_node *np = slim->dev.of_node;
 	intf_type = wcd9xxx_get_intf_type();
 
 	wcd9xxx = devm_kzalloc(&slim->dev, sizeof(struct wcd9xxx),
@@ -1423,6 +1519,63 @@ static int wcd9xxx_slim_probe(struct slim_device *slim)
 		(void *) "slimslave_reg_dump", &codec_debug_ops);
 	}
 #endif
+
+/*2018/06/14 @bsp add for support notify audio adapter switch*/
+    pr_err("%s: fsa4480_enable is %s\n", __func__, fsa4480_enable ? "true": "false");
+        if (of_property_read_bool(np, "op,usb_sw") && !fsa4480_enable) {
+			pr_err("%s usb_sw find\n",__func__);
+
+			mbhc_sw_gpio = of_get_named_gpio(np, "mbhc_sw", 0);
+			if (mbhc_sw_gpio < 0){
+				pr_err("mbhc_sw_gpio of get gpio failed\n");
+			} else {
+				gpio_free(mbhc_sw_gpio);
+				ret = devm_gpio_request_one(&slim->dev, mbhc_sw_gpio,
+					GPIOF_OUT_INIT_HIGH, "mbhc sw gpio");
+				if (ret) {
+					pr_err("%s devm_gpio_request_one mbhc_sw_gpio failed\n",__func__);
+				}
+			}
+
+			usb_sw_gpio = of_get_named_gpio(np, "usb_sw", 0);
+			if (usb_sw_gpio < 0){
+				pr_err("usb_sw_gpio of get gpio failed\n");
+			} else {
+				gpio_free(usb_sw_gpio);
+				ret = devm_gpio_request_one(&slim->dev, usb_sw_gpio,
+					GPIOF_OUT_INIT_LOW, "usb sw gpio");
+				if (ret) {
+					pr_err("%s devm_gpio_request_one usb sw gpio failed\n",__func__);
+				}
+			}
+
+			hp_sw_gpio = of_get_named_gpio(np, "hp_sw", 0);
+			if (hp_sw_gpio < 0){
+				pr_err("hp_sw_gpio of get gpio failed\n");
+			} else {
+                                pr_err("hp_sw_gpio of get gpio success\n");
+				gpio_free(hp_sw_gpio);
+				ret = devm_gpio_request_one(&slim->dev, hp_sw_gpio,
+					GPIOF_OUT_INIT_LOW, "hp sw gpio");
+				if (ret) {
+					pr_err("%s devm_gpio_request_one hp_sw_gpio failed\n",__func__);
+				}
+			}
+
+			ldo_sw_gpio = of_get_named_gpio(np, "ldo_sw", 0);
+			if (ldo_sw_gpio < 0){
+				pr_err("ldo_sw_gpio of get gpio failed\n");
+			} else {
+                pr_err("ldo_sw_gpio of get gpio success\n");
+				gpio_free(ldo_sw_gpio);
+				ret = devm_gpio_request_one(&slim->dev, ldo_sw_gpio,
+					GPIOF_OUT_INIT_LOW, "ldo sw gpio");
+				if (ret) {
+					pr_err("%s devm_gpio_request_one ldo_sw_gpio failed\n",__func__);
+				}
+			}
+	        register_cc_notifier_client(&typec_cc_notifier);
+		}
 
 	return ret;
 

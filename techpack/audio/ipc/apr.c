@@ -28,6 +28,7 @@
 #include <linux/of.h>
 #include <linux/slab.h>
 #include <linux/ipc_logging.h>
+#include <linux/of_platform.h>
 #include <soc/qcom/subsystem_restart.h>
 #include <soc/qcom/scm.h>
 #include <dsp/apr_audio-v2.h>
@@ -43,6 +44,7 @@ static void *apr_pkt_ctx;
 static wait_queue_head_t dsp_wait;
 static wait_queue_head_t modem_wait;
 static bool is_modem_up;
+static char *subsys_name = NULL;
 /* Subsystem restart: QDSP6 data, functions */
 static struct workqueue_struct *apr_reset_workqueue;
 static void apr_reset_deregister(struct work_struct *work);
@@ -62,8 +64,6 @@ struct apr_private {
 	spinlock_t apr_lock;
 	bool is_initial_boot;
 	struct work_struct add_chld_dev_work;
-	spinlock_t apr_chld_lock;
-	struct list_head apr_chlds;
 };
 
 static struct apr_private *apr_priv;
@@ -284,44 +284,12 @@ static void apr_adsp_down(unsigned long opcode)
 static void apr_add_child_devices(struct work_struct *work)
 {
 	int ret;
-	struct device_node *node;
-	struct platform_device *pdev;
-	struct apr_chld_device *apr_chld_dev;
 
-	for_each_child_of_node(apr_priv->dev->of_node, node) {
-		apr_chld_dev = kzalloc(sizeof(*apr_chld_dev), GFP_KERNEL);
-		if (!apr_chld_dev)
-			continue;
-		pdev = platform_device_alloc(node->name, -1);
-		if (!pdev) {
-			dev_err(apr_priv->dev,
-				"%s: pdev memory alloc failed for %s\n",
-				__func__, node->name);
-			kfree(apr_chld_dev);
-			continue;
-		}
-		pdev->dev.parent = apr_priv->dev;
-		pdev->dev.of_node = node;
-
-		ret = platform_device_add(pdev);
-		if (ret) {
-			dev_err(apr_priv->dev,
-				"%s: Cannot add platform device %s\n",
-				__func__, node->name);
-			platform_device_put(pdev);
-			kfree(apr_chld_dev);
-			continue;
-		}
-
-		apr_chld_dev->pdev = pdev;
-
-		spin_lock(&apr_priv->apr_chld_lock);
-		list_add_tail(&apr_chld_dev->node, &apr_priv->apr_chlds);
-		spin_unlock(&apr_priv->apr_chld_lock);
-
-		dev_dbg(apr_priv->dev, "%s: Added APR child dev: %s\n",
-			 __func__, dev_name(&pdev->dev));
-	}
+	ret = of_platform_populate(apr_priv->dev->of_node,
+			NULL, NULL, apr_priv->dev);
+	 if (ret)
+		dev_dbg(apr_priv->dev, "%s: failed to add child nodes, ret=%d\n",
+			 __func__, ret);
 }
 
 static void apr_adsp_up(void)
@@ -399,7 +367,7 @@ int apr_send_pkt(void *handle, uint32_t *buf)
 		return -EINVAL;
 	}
 	if (svc->need_reset) {
-		pr_err("apr: send_pkt service need reset\n");
+		pr_err_ratelimited("apr: send_pkt service need reset\n");
 		return -ENETRESET;
 	}
 
@@ -1091,6 +1059,7 @@ static void apr_cleanup(void)
 {
 	int i, j, k;
 
+	of_platform_depopulate(apr_priv->dev);
 	if (apr_reset_workqueue) {
 		flush_workqueue(apr_reset_workqueue);
 		destroy_workqueue(apr_reset_workqueue);
@@ -1103,11 +1072,12 @@ static void apr_cleanup(void)
 				mutex_destroy(&client[i][j].svc[k].m_lock);
 		}
 	}
+	debugfs_remove(debugfs_apr_debug);
 }
 
 static int apr_probe(struct platform_device *pdev)
 {
-	int i, j, k;
+	int i, j, k, ret = 0;
 
 	init_waitqueue_head(&dsp_wait);
 	init_waitqueue_head(&modem_wait);
@@ -1118,8 +1088,6 @@ static int apr_probe(struct platform_device *pdev)
 
 	apr_priv->dev = &pdev->dev;
 	spin_lock_init(&apr_priv->apr_lock);
-	spin_lock_init(&apr_priv->apr_chld_lock);
-	INIT_LIST_HEAD(&apr_priv->apr_chlds);
 	INIT_WORK(&apr_priv->add_chld_dev_work, apr_add_child_devices);
 
 	for (i = 0; i < APR_DEST_MAX; i++)
@@ -1146,26 +1114,33 @@ static int apr_probe(struct platform_device *pdev)
 	spin_lock(&apr_priv->apr_lock);
 	apr_priv->is_initial_boot = true;
 	spin_unlock(&apr_priv->apr_lock);
-	subsys_notif_register("apr_adsp", AUDIO_NOTIFIER_ADSP_DOMAIN,
-			      &adsp_service_nb);
-	subsys_notif_register("apr_modem", AUDIO_NOTIFIER_MODEM_DOMAIN,
-			      &modem_service_nb);
+	ret = of_property_read_string(pdev->dev.of_node,
+				      "qcom,subsys-name",
+				      (const char **)(&subsys_name));
+	if (ret) {
+		pr_err("%s: missing subsys-name entry in dt node\n", __func__);
+		return -EINVAL;
+	}
+
+	if (!strcmp(subsys_name, "apr_adsp")) {
+		subsys_notif_register("apr_adsp",
+				       AUDIO_NOTIFIER_ADSP_DOMAIN,
+				       &adsp_service_nb);
+	} else if (!strcmp(subsys_name, "apr_modem")) {
+		subsys_notif_register("apr_modem",
+				       AUDIO_NOTIFIER_MODEM_DOMAIN,
+				       &modem_service_nb);
+	} else {
+		pr_err("%s: invalid subsys-name %s\n", __func__, subsys_name);
+		return -EINVAL;
+	}
 
 	return apr_debug_init();
 }
 
 static int apr_remove(struct platform_device *pdev)
 {
-	struct apr_chld_device *chld, *tmp;
-
 	apr_cleanup();
-	spin_lock(&apr_priv->apr_chld_lock);
-	list_for_each_entry_safe(chld, tmp, &apr_priv->apr_chlds, node) {
-		platform_device_unregister(chld->pdev);
-		list_del(&chld->node);
-		kfree(chld);
-	}
-	spin_unlock(&apr_priv->apr_chld_lock);
 	apr_priv = NULL;
 	return 0;
 }

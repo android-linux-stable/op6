@@ -38,18 +38,12 @@ wcd-core-objs	+= wcd934x/wcd934x-tables.o
 
 obj-$(CONFIG_WCD9XXX_CODEC_CORE) += wcd-core.o
 obj-$(CONFIG_SND_SOC_MSM_HDMI_CODEC_RX) += msm_hdmi_codec_rx.o
-
-#wangdongdong@MultiMediaService,2017/09/11,add for tfa9890
-#obj-y += snd-soc-tfa98xx.o
-
-#snd-soc-tfa98xx-objs += tfa9890/tfa98xx.o
-#snd-soc-tfa98xx-objs += tfa9890/tfa_container.o
-#snd-soc-tfa98xx-objs += tfa9890/tfa_dsp.o
-#snd-soc-tfa98xx-objs += tfa9890/tfa9888_init.o
-#snd-soc-tfa98xx-objs += tfa9890/tfa9891_init.o
-#snd-soc-tfa98xx-objs += tfa9890/tfa9897_init.o
-#snd-soc-tfa98xx-objs += tfa9890/tfa9890_init.o
-#snd-soc-tfa98xx-objs += tfa9890/tfa9887B_init.o
-#snd-soc-tfa98xx-objs += tfa9890/tfa9887_init.o
-
+#suzhiguang@MultiMediaService,2018/03/12,add smart pa
 obj-y += max/max98927.o
+obj-y += tfa9874/tfa98xx.o
+obj-y += tfa9874/tfa_container.o
+obj-y += tfa9874/tfa_dsp.o
+obj-y += tfa9874/tfa_init.o
+
+#suzhiguang@MultiMediaService,add for fsa
+obj-y += fsa4840/fsa4840.o

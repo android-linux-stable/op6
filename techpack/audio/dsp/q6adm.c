@@ -1,4 +1,4 @@
-/* Copyright (c) 2012-2017, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2012-2018, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -104,7 +104,6 @@ struct adm_ctl {
 	int num_ec_ref_rx_chans;
 	int ec_ref_rx_bit_width;
 	int ec_ref_rx_sampling_rate;
-	int lsm_port_id;
 };
 
 static struct adm_ctl			this_adm;
@@ -738,7 +737,7 @@ int adm_programable_channel_mixer(int port_id, int copp_idx, int session_id,
 	index = index + ch_mixer->input_channels[channel_index];
 	ret = adm_populate_channel_weight(&adm_pspd_params[index],
 					ch_mixer, channel_index);
-	if (!ret) {
+	if (ret) {
 		pr_err("%s: fail to get channel weight with error %d\n",
 			__func__, ret);
 		goto fail_cmd;
@@ -1828,7 +1827,7 @@ static void send_adm_custom_topology(void)
 	this_adm.set_custom_topology = 0;
 
 	cal_block = cal_utils_get_only_cal_block(this_adm.cal_data[cal_index]);
-	if (cal_block == NULL)
+	if (cal_block == NULL || cal_utils_is_cal_stale(cal_block))
 		goto unlock;
 
 	pr_debug("%s: Sending cal_index %d\n", __func__, cal_index);
@@ -2009,8 +2008,11 @@ static struct cal_block_data *adm_find_cal_by_path(int cal_index, int path)
 		cal_block = list_entry(ptr,
 			struct cal_block_data, list);
 
+		if (cal_utils_is_cal_stale(cal_block))
+			continue;
+
 		if (cal_index == ADM_AUDPROC_CAL ||
-		    cal_index == ADM_LSM_AUDPROC_CAL) {
+			cal_index == ADM_LSM_AUDPROC_CAL) {
 			audproc_cal_info = cal_block->cal_info;
 			if ((audproc_cal_info->path == path) &&
 			    (cal_block->cal_data.size > 0))
@@ -2043,8 +2045,11 @@ static struct cal_block_data *adm_find_cal_by_app_type(int cal_index, int path,
 		cal_block = list_entry(ptr,
 			struct cal_block_data, list);
 
+		if (cal_utils_is_cal_stale(cal_block))
+			continue;
+
 		if (cal_index == ADM_AUDPROC_CAL ||
-		    cal_index == ADM_LSM_AUDPROC_CAL) {
+			cal_index == ADM_LSM_AUDPROC_CAL) {
 			audproc_cal_info = cal_block->cal_info;
 			if ((audproc_cal_info->path == path) &&
 			    (audproc_cal_info->app_type == app_type) &&
@@ -2080,6 +2085,8 @@ static struct cal_block_data *adm_find_cal(int cal_index, int path,
 
 		cal_block = list_entry(ptr,
 			struct cal_block_data, list);
+		if (cal_utils_is_cal_stale(cal_block))
+			continue;
 
 		if (cal_index == ADM_AUDPROC_CAL ||
 		    cal_index == ADM_LSM_AUDPROC_CAL) {
@@ -2149,6 +2156,8 @@ static void send_adm_cal_type(int cal_index, int path, int port_id,
 
 	ret = adm_remap_and_send_cal_block(cal_index, port_id, copp_idx,
 		cal_block, perf_mode, app_type, acdb_id, sample_rate);
+
+	cal_utils_mark_cal_used(cal_block);
 unlock:
 	mutex_unlock(&this_adm.cal_data[cal_index]->lock);
 done:
@@ -2163,17 +2172,13 @@ static int get_cal_path(int path)
 		return TX_DEVICE;
 }
 
-void adm_set_lsm_port_id(int port_id)
-{
-	this_adm.lsm_port_id = port_id;
-}
-
 static void send_adm_cal(int port_id, int copp_idx, int path, int perf_mode,
-			 int app_type, int acdb_id, int sample_rate)
+			 int app_type, int acdb_id, int sample_rate,
+			 int passthr_mode)
 {
 	pr_debug("%s: port id 0x%x copp_idx %d\n", __func__, port_id, copp_idx);
 
-	if (port_id != this_adm.lsm_port_id)
+	if (passthr_mode != LISTEN)
 		send_adm_cal_type(ADM_AUDPROC_CAL, path, port_id, copp_idx,
 				perf_mode, app_type, acdb_id, sample_rate);
 	else
@@ -2890,7 +2895,8 @@ int adm_matrix_map(int path, struct route_payload payload_map, int perf_mode,
 				     get_cal_path(path), perf_mode,
 				     payload_map.app_type[i],
 				     payload_map.acdb_dev_id[i],
-				     payload_map.sample_rate[i]);
+				     payload_map.sample_rate[i],
+				     passthr_mode);
 			/* ADM COPP calibration is already sent */
 			clear_bit(ADM_STATUS_CALIBRATION_REQUIRED,
 				(void *)&this_adm.copp.
@@ -3081,7 +3087,7 @@ int send_rtac_audvol_cal(void)
 
 	cal_block = cal_utils_get_only_cal_block(
 		this_adm.cal_data[ADM_RTAC_AUDVOL_CAL]);
-	if (cal_block == NULL) {
+	if (cal_block == NULL || cal_utils_is_cal_stale(cal_block)) {
 		pr_err("%s: can't find cal block!\n", __func__);
 		goto unlock;
 	}

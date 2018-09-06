@@ -1,4 +1,4 @@
-/* Copyright (c) 2014-2017, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2014-2018, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -18,7 +18,7 @@
 #include "wcdcal-hwdep.h"
 #include <sound/jack.h>
 
-
+/* tony.liu@Multimedia.Audio,2017.12.21 add headset plug type detect */
 #include <linux/extcon.h>
 
 #define TOMBAK_MBHC_NC	0
@@ -158,6 +158,7 @@ do {                                                    \
 #define WCD_MBHC_SPL_HS_CNT  1
 
 
+/* tony.liu@Multimedia.Audio,2017.12.21 add headset plug type detect */
 enum extcon_plug_type {
 	EXTCON_PLUG_TYPE_NONE = 19,             //19  no headset insert
 	EXTCON_PLUG_TYPE_HEADSET = 20,          //20
@@ -200,9 +201,7 @@ enum wcd_mbhc_register_function {
 	WCD_MBHC_BTN_DBNC,
 	WCD_MBHC_HS_VREF,
 	WCD_MBHC_HS_COMP_RESULT,
-	/* qcom patch */
 	WCD_MBHC_IN2P_CLAMP_STATE,
-	/* patch end */
 	WCD_MBHC_MIC_SCHMT_RESULT,
 	WCD_MBHC_HPHL_SCHMT_RESULT,
 	WCD_MBHC_HPHR_SCHMT_RESULT,
@@ -527,6 +526,7 @@ struct wcd_mbhc {
 	struct wcd_mbhc_config *mbhc_cfg;
 	const struct wcd_mbhc_cb *mbhc_cb;
 
+/* tony.liu@Multimedia.Audio,2017.12.21 add headset plug type detect */
 	struct extcon_dev *wcd934x_edev;
 	u32 hph_status; /* track headhpone status */
 	u8 hphlocp_cnt; /* headphone left ocp retry */
@@ -540,6 +540,7 @@ struct wcd_mbhc {
 	bool gnd_swh; /*track GND switch NC / NO */
 	u32 hs_thr;
 	u32 hph_thr;
+	u32 micb_mv;
 	u32 swap_thr;
 	u32 moist_vref;
 	u32 moist_iref;

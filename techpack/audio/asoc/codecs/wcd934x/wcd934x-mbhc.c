@@ -1,5 +1,4 @@
-/*
- * Copyright (c) 2015-2017, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2015-2018, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -86,10 +85,8 @@ static struct wcd_mbhc_register
 			  WCD934X_MBHC_NEW_CTL_2, 0x03, 0, 0),
 	WCD_MBHC_REGISTER("WCD_MBHC_HS_COMP_RESULT",
 			  WCD934X_ANA_MBHC_RESULT_3, 0x08, 3, 0),
-	/* qcom patch */
 	WCD_MBHC_REGISTER("WCD_MBHC_IN2P_CLAMP_STATE",
 			  WCD934X_ANA_MBHC_RESULT_3, 0x10, 4, 0),
-	/* patch end */
 	WCD_MBHC_REGISTER("WCD_MBHC_MIC_SCHMT_RESULT",
 			  WCD934X_ANA_MBHC_RESULT_3, 0x20, 5, 0),
 	WCD_MBHC_REGISTER("WCD_MBHC_HPHL_SCHMT_RESULT",
@@ -966,6 +963,27 @@ static const struct snd_kcontrol_new impedance_detect_controls[] = {
 		       tavil_hph_impedance_get, NULL),
 };
 
+/* liuhaituo@MM.Audio 2018/7/17 add for headset impedance detect */
+extern bool headset_imp_enable;
+
+static int headset_imp_feature_put(struct snd_kcontrol *kcontrol,
+				struct snd_ctl_elem_value *ucontrol)
+{
+	int type = ucontrol->value.integer.value[0];
+	if (type != 0)
+		headset_imp_enable = true;
+
+	pr_info("%s: headset_imp_feature is  %d\n",
+				__func__, headset_imp_enable);
+
+	return 0;
+}
+
+static const struct snd_kcontrol_new headset_feature_controls[] = {
+	SOC_SINGLE_EXT("headset_imp_feature", 0, 0, UINT_MAX, 0,
+				NULL, headset_imp_feature_put),
+};
+
 /*
  * tavil_mbhc_get_impedance: get impedance of headphone left and right channels
  * @wcd934x_mbhc: handle to struct wcd934x_mbhc *
@@ -1081,6 +1099,7 @@ int tavil_mbhc_init(struct wcd934x_mbhc **mbhc, struct snd_soc_codec *codec,
 	struct wcd934x_mbhc *wcd934x_mbhc;
 	struct wcd_mbhc *wcd_mbhc;
 	int ret;
+	struct wcd9xxx_pdata *pdata;
 
 	wcd934x_mbhc = devm_kzalloc(codec->dev, sizeof(struct wcd934x_mbhc),
 				    GFP_KERNEL);
@@ -1100,6 +1119,14 @@ int tavil_mbhc_init(struct wcd934x_mbhc **mbhc, struct snd_soc_codec *codec,
 
 	/* Setting default mbhc detection logic to ADC for Tavil */
 	wcd_mbhc->mbhc_detection_logic = WCD_DETECTION_ADC;
+
+	pdata = dev_get_platdata(codec->dev->parent);
+	if (!pdata) {
+		dev_err(codec->dev, "%s: pdata pointer is NULL\n", __func__);
+		ret = -EINVAL;
+		goto err;
+	}
+	wcd_mbhc->micb_mv = pdata->micbias.micb2_mv;
 
 	ret = wcd_mbhc_init(wcd_mbhc, codec, &mbhc_cb,
 				&intr_ids, wcd_mbhc_registers,
@@ -1126,6 +1153,9 @@ int tavil_mbhc_init(struct wcd934x_mbhc **mbhc, struct snd_soc_codec *codec,
 				   ARRAY_SIZE(impedance_detect_controls));
 	snd_soc_add_codec_controls(codec, hph_type_detect_controls,
 				   ARRAY_SIZE(hph_type_detect_controls));
+/* liuhaituo@MM.Audio 2018/7/17 add for headset impedance detect */
+	snd_soc_add_codec_controls(codec, headset_feature_controls,
+				   ARRAY_SIZE(headset_feature_controls));
 
 	if (wcd_mbhc->mbhc_detection_logic == WCD_DETECTION_LEGACY) {
 		snd_soc_update_bits(codec, WCD934X_MBHC_NEW_CTL_1, 0x04, 0x04);

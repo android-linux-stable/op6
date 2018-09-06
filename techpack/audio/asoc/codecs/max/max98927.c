@@ -22,15 +22,15 @@
 #include <linux/debugfs.h>
 #include "max98927.h"
 
-#undef pr_info
-#define pr_info pr_err
+//#undef pr_info
+//#define pr_info pr_err
 
-#undef pr_debug
-#define pr_debug pr_err
+//#undef pr_debug
+//#define pr_debug pr_err
 
-//su
-struct device_node *max_codec_np = NULL;
-EXPORT_SYMBOL_GPL(max_codec_np);
+//suzhiguang
+int smartpa_present = 0;
+EXPORT_SYMBOL_GPL(smartpa_present);
 
 struct max98927_priv *g_max98927 = NULL;
 EXPORT_SYMBOL_GPL(g_max98927);
@@ -2032,15 +2032,8 @@ static int max98927_i2c_probe(struct i2c_client *i2c,
 	static struct max98927_priv *max98927 = NULL;
 	int value, i, ret = 0;
 	unsigned int presence = 0;
-	struct device_node *np = i2c->dev.of_node;
 
     pr_err("****** %s id.name =%s id.driver_data= %d \n",__func__,id->name,(int)(id->driver_data));
-
-//su
-    if(np!=NULL && (id->driver_data == 0))
-        max_codec_np =np;
-
-
 
 	if (!max98927) {
 		max98927 = devm_kzalloc(&i2c->dev,
@@ -2141,6 +2134,7 @@ static int max98927_i2c_probe(struct i2c_client *i2c,
 		}
 	}
 	if(presence){
+        smartpa_present = 1;
 		if(max98927->dev == NULL){
 			dev_set_name(&i2c->dev, "%s", "max98927");			//rename the i2c clinet name for easy to use.
 			ret = snd_soc_register_codec(&i2c->dev, &soc_codec_dev_max98927,
@@ -2169,8 +2163,11 @@ static int max98927_i2c_probe(struct i2c_client *i2c,
         pr_err("%s sysfs_create_file max98927_state_attr err.",__func__);
     }
 	}else
+	{
 		pr_err("max98927 detection failed at %s - %x. \n", i2c->name, i2c->addr);
-
+		//suzhiguang,should release when no smartpa detect.
+		gpio_free(max98927->reset_gpio_l);
+	}
 	return ret;
 }
 
