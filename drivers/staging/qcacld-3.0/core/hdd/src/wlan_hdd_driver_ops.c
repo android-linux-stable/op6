@@ -1,9 +1,6 @@
 /*
  * Copyright (c) 2015-2018 The Linux Foundation. All rights reserved.
  *
- * Previously licensed under the ISC license by Qualcomm Atheros, Inc.
- *
- *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
  * above copyright notice and this permission notice appear in all
@@ -17,12 +14,6 @@
  * PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER
  * TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR
  * PERFORMANCE OF THIS SOFTWARE.
- */
-
-/*
- * This file was originally distributed by Qualcomm Atheros, Inc.
- * under proprietary terms before Copyright ownership was assigned
- * to the Linux Foundation.
  */
 
 #include <linux/platform_device.h>
@@ -47,6 +38,8 @@
 #include "pld_common.h"
 #include "wlan_hdd_driver_ops.h"
 #include "wlan_hdd_scan.h"
+#include "wlan_hdd_ipa.h"
+#include "wlan_hdd_debugfs.h"
 
 #ifdef MODULE
 #define WLAN_MODULE_NAME  module_name(THIS_MODULE)
@@ -301,24 +294,31 @@ void hdd_hif_close(void *hif_ctx)
  * @bus_type: Underlying bus type
  * @bid: Bus id passed by platform driver
  *
- * Return: void
+ * Return: 0 - success, < 0 - failure
  */
-static void hdd_init_qdf_ctx(struct device *dev, void *bdev,
-			     enum qdf_bus_type bus_type,
-			     const struct hif_bus_id *bid)
+static int hdd_init_qdf_ctx(struct device *dev, void *bdev,
+			    enum qdf_bus_type bus_type,
+			    const struct hif_bus_id *bid)
 {
 	qdf_device_t qdf_dev = cds_get_context(QDF_MODULE_ID_QDF_DEVICE);
 
 	if (!qdf_dev) {
 		hdd_err("Invalid QDF device");
-		return;
+		return -EINVAL;
 	}
 
 	qdf_dev->dev = dev;
 	qdf_dev->drv_hdl = bdev;
 	qdf_dev->bus_type = bus_type;
 	qdf_dev->bid = bid;
-	cds_smmu_mem_map_setup(qdf_dev);
+
+	if (cds_smmu_mem_map_setup(qdf_dev, hdd_ipa_is_present()) !=
+		QDF_STATUS_SUCCESS) {
+		hdd_err("cds_smmu_mem_map_setup() failed");
+		return -EFAULT;
+	}
+
+	return 0;
 }
 
 /**
@@ -361,6 +361,7 @@ static int wlan_hdd_probe(struct device *dev, void *bdev, const struct hif_bus_i
 	int ret = 0;
 
 	mutex_lock(&hdd_init_deinit_lock);
+	cds_set_driver_in_bad_state(false);
 	if (!reinit)
 		hdd_start_driver_ops_timer(eHDD_DRV_OP_PROBE);
 	else
@@ -384,7 +385,10 @@ static int wlan_hdd_probe(struct device *dev, void *bdev, const struct hif_bus_i
 	else
 		cds_set_load_in_progress(true);
 
-	hdd_init_qdf_ctx(dev, bdev, bus_type, (const struct hif_bus_id *)bid);
+	ret = hdd_init_qdf_ctx(dev, bdev, bus_type,
+			       (const struct hif_bus_id *)bid);
+	if (ret < 0)
+		goto err_init_qdf_ctx;
 
 	if (reinit) {
 		ret = hdd_wlan_re_init();
@@ -411,7 +415,6 @@ static int wlan_hdd_probe(struct device *dev, void *bdev, const struct hif_bus_i
 	hdd_allow_suspend(WIFI_POWER_EVENT_WAKELOCK_DRIVER_INIT);
 	hdd_remove_pm_qos(dev);
 
-	cds_set_driver_in_bad_state(false);
 	probe_fail_cnt = 0;
 	re_init_fail_cnt = 0;
 	hdd_stop_driver_ops_timer();
@@ -432,6 +435,7 @@ err_hdd_deinit:
 	} else
 		cds_set_load_in_progress(false);
 
+err_init_qdf_ctx:
 	hdd_allow_suspend(WIFI_POWER_EVENT_WAKELOCK_DRIVER_INIT);
 	hdd_remove_pm_qos(dev);
 
@@ -463,6 +467,9 @@ static void wlan_hdd_remove(struct device *dev)
 
 	if (!cds_wait_for_external_threads_completion(__func__))
 		hdd_warn("External threads are still active attempting driver unload anyway");
+
+	if (!hdd_wait_for_debugfs_threads_completion())
+		hdd_warn("Debugfs threads are still active attempting driver unload anyway");
 
 	hdd_pld_driver_unloading(dev);
 
@@ -543,6 +550,18 @@ static void wlan_hdd_shutdown(void)
 		hdd_err("Load/unload in progress, ignore SSR shutdown");
 		return;
 	}
+
+	/*
+	 * Force Complete all the wait events before shutdown.
+	 * This is done at "hdd_cleanup_on_fw_down" api also to clean up the
+	 * wait events of north bound apis.
+	 * In case of SSR there is significant dely between FW down event and
+	 * wlan_hdd_shutdown, there is a possibility of race condition that
+	 * these wait events gets complete at "hdd_cleanup_on_fw_down" and
+	 * some new event is added before shutdown.
+	 */
+	qdf_complete_wait_events();
+
 	/* this is for cases, where shutdown invoked from platform */
 	cds_set_recovery_in_progress(true);
 	hdd_wlan_ssr_shutdown_event();
@@ -550,6 +569,9 @@ static void wlan_hdd_shutdown(void)
 
 	if (!cds_wait_for_external_threads_completion(__func__))
 		hdd_err("Host is not ready for SSR, attempting anyway");
+
+	if (!hdd_wait_for_debugfs_threads_completion())
+		hdd_err("Debufs threads are still pending, attempting SSR anyway");
 
 	if (!QDF_IS_EPPING_ENABLED(cds_get_conparam())) {
 		hif_disable_isr(hif_ctx);
@@ -748,6 +770,11 @@ static int __wlan_hdd_bus_suspend_noirq(void)
 		return err;
 	}
 
+	if (hdd_ctx->driver_status == DRIVER_MODULES_OPENED) {
+		hdd_err("Driver open state,  can't suspend");
+		return -EAGAIN;
+	}
+
 	if (hdd_ctx->driver_status != DRIVER_MODULES_ENABLED) {
 		hdd_debug("Driver Module closed return success");
 		return 0;
@@ -827,6 +854,11 @@ static int __wlan_hdd_bus_resume(void)
 	if (status) {
 		hdd_err("Invalid hdd context");
 		return status;
+	}
+
+	if (hdd_ctx->driver_status == DRIVER_MODULES_OPENED) {
+		hdd_err("Driver open state,  can't suspend");
+		return -EAGAIN;
 	}
 
 	if (hdd_ctx->driver_status != DRIVER_MODULES_ENABLED) {
@@ -1349,7 +1381,11 @@ static void hdd_cleanup_on_fw_down(void)
 static void wlan_hdd_set_the_pld_uevent(struct pld_uevent_data *uevent)
 {
 	switch (uevent->uevent) {
+	case PLD_FW_DOWN:
+		cds_set_target_ready(false);
+		break;
 	case PLD_RECOVERY:
+		cds_set_target_ready(false);
 		cds_set_recovery_in_progress(true);
 		break;
 	default:
@@ -1371,7 +1407,6 @@ static void wlan_hdd_pld_uevent(struct device *dev,
 
 	ENTER();
 
-	mutex_lock(&hdd_init_deinit_lock);
 
 	hdd_info("pld event %d", uevent->uevent);
 
@@ -1385,8 +1420,10 @@ static void wlan_hdd_pld_uevent(struct device *dev,
 
 	wlan_hdd_set_the_pld_uevent(uevent);
 
+	mutex_lock(&hdd_init_deinit_lock);
 	switch (uevent->uevent) {
 	case PLD_RECOVERY:
+		cds_set_target_ready(false);
 		hdd_pld_ipa_uc_shutdown_pipes();
 		wlan_hdd_purge_notifier();
 		break;
@@ -1394,9 +1431,9 @@ static void wlan_hdd_pld_uevent(struct device *dev,
 		hdd_cleanup_on_fw_down();
 		break;
 	}
-uevent_not_allowed:
 	mutex_unlock(&hdd_init_deinit_lock);
 
+uevent_not_allowed:
 	EXIT();
 	return;
 }

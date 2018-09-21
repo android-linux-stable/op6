@@ -1,9 +1,6 @@
 /*
  * Copyright (c) 2013-2018 The Linux Foundation. All rights reserved.
  *
- * Previously licensed under the ISC license by Qualcomm Atheros, Inc.
- *
- *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
  * above copyright notice and this permission notice appear in all
@@ -17,12 +14,6 @@
  * PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER
  * TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR
  * PERFORMANCE OF THIS SOFTWARE.
- */
-
-/*
- * This file was originally distributed by Qualcomm Atheros, Inc.
- * under proprietary terms before Copyright ownership was assigned
- * to the Linux Foundation.
  */
 
 #ifndef WMA_INTERNAL_H
@@ -1235,6 +1226,16 @@ QDF_STATUS wma_set_led_flashing(tp_wma_handle wma_handle,
 				tSirLedFlashingReq *flashing);
 #endif
 
+/**
+ * wma_sar_rsp_evt_handler() -  process sar response event from FW.
+ * @scn_handle: scn handle
+ * @event: event buffer
+ * @len: buffer length
+ *
+ * Return: 0 for success or error code
+ */
+int wma_sar_rsp_evt_handler(ol_scn_t scn_handle, uint8_t *event, uint32_t len);
+
 #ifdef FEATURE_WLAN_CH_AVOID
 int wma_channel_avoid_evt_handler(void *handle, uint8_t *event,
 					 uint32_t len);
@@ -1500,9 +1501,9 @@ int wma_fill_beacon_interval_reset_req(tp_wma_handle wma, uint8_t vdev_id,
 				uint16_t beacon_interval, uint32_t timeout);
 
 /**
- * wma_peer_ant_info_evt_handler - event handler to handle antenna info
+ * wma_pdev_div_info_evt_handler - event handler to handle antenna info
  * @handle: the wma handle
- * @event: buffer with event
+ * @event_buf: buffer with event
  * @len: buffer length
  *
  * This function receives antenna info from firmware and passes the event
@@ -1510,7 +1511,7 @@ int wma_fill_beacon_interval_reset_req(tp_wma_handle wma, uint8_t vdev_id,
  *
  * Return: 0 on success
  */
-int wma_peer_ant_info_evt_handler(void *handle, u_int8_t *event,
+int wma_pdev_div_info_evt_handler(void *handle, u_int8_t *event_buf,
 	u_int32_t len);
 
 /**
@@ -1569,5 +1570,26 @@ int wma_rx_aggr_failure_event_handler(void *handle, u_int8_t *event_buf,
  * Return: 'true' on valid vdev else 'false'
  */
 bool wma_is_vdev_valid(uint32_t vdev_id);
+
+/**
+ * wma_get_roam_scan_stats() - Get roam scan stats request
+ * @handle: wma handle
+ * @req: request details
+ *
+ * Return: QDF_STATUS
+ */
+QDF_STATUS wma_get_roam_scan_stats(WMA_HANDLE handle,
+				   struct sir_roam_scan_stats *req);
+
+/**
+ * wma_roam_scan_stats_event_handler() - roam scan stats event handler
+ * @handle: wma handle
+ * @event: event data
+ * @len: length of data
+ *
+ * Return: Success or Failure status
+ */
+int wma_roam_scan_stats_event_handler(void *handle, uint8_t *event,
+				      uint32_t len);
 
 #endif

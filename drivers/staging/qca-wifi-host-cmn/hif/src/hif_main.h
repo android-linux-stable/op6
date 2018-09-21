@@ -1,9 +1,6 @@
 /*
  * Copyright (c) 2013-2017 The Linux Foundation. All rights reserved.
  *
- * Previously licensed under the ISC license by Qualcomm Atheros, Inc.
- *
- *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
  * above copyright notice and this permission notice appear in all
@@ -17,12 +14,6 @@
  * PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER
  * TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR
  * PERFORMANCE OF THIS SOFTWARE.
- */
-
-/*
- * This file was originally distributed by Qualcomm Atheros, Inc.
- * under proprietary terms before Copyright ownership was assigned
- * to the Linux Foundation.
  */
 
 /*
@@ -116,8 +107,27 @@ enum hif_fake_apps_state_bits {
 	HIF_FA_SUSPENDED_BIT = 0
 };
 
+void hif_fake_apps_init_ctx(struct hif_softc *scn);
 void hif_fake_apps_resume_work(struct work_struct *work);
-#endif /* WLAN_SUSPEND_RESUME_TEST */
+bool hif_interrupt_is_fake_apps_resume(struct hif_opaque_softc *hif_ctx,
+					      int ce_id);
+void hif_trigger_fake_apps_resume(struct hif_opaque_softc *hif_ctx);
+#else
+static inline void hif_fake_apps_init_ctx(struct hif_softc *scn)
+{
+}
+
+static inline bool
+hif_interrupt_is_fake_apps_resume(struct hif_opaque_softc *hif_ctx, int ce_id)
+{
+	return false;
+}
+
+static inline void
+hif_trigger_fake_apps_resume(struct hif_opaque_softc *hif_ctx)
+{
+}
+#endif /* End of WLAN_SUSPEND_RESUME_TEST */
 
 struct hif_softc {
 	struct hif_opaque_softc osc;

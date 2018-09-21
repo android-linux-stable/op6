@@ -1,9 +1,6 @@
 /*
  * Copyright (c) 2013-2018 The Linux Foundation. All rights reserved.
  *
- * Previously licensed under the ISC license by Qualcomm Atheros, Inc.
- *
- *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
  * above copyright notice and this permission notice appear in all
@@ -17,12 +14,6 @@
  * PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER
  * TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR
  * PERFORMANCE OF THIS SOFTWARE.
- */
-
-/*
- * This file was originally distributed by Qualcomm Atheros, Inc.
- * under proprietary terms before Copyright ownership was assigned
- * to the Linux Foundation.
  */
 
 #ifndef WMA_H
@@ -206,6 +197,19 @@
 #define WMA_BEACON_TX_RATE_36_M           360
 #define WMA_BEACON_TX_RATE_48_M           480
 #define WMA_BEACON_TX_RATE_54_M           540
+
+#define WMA_FW_MODE_STA_STA_BIT_POS       0
+#define WMA_FW_MODE_STA_P2P_BIT_POS       1
+
+#define WMA_FW_MODE_STA_STA_BIT_MASK      (0x1 << WMA_FW_MODE_STA_STA_BIT_POS)
+#define WMA_FW_MODE_STA_P2P_BIT_MASK      (0x1 << WMA_FW_MODE_STA_P2P_BIT_POS)
+
+#define WMA_CHANNEL_SELECT_LOGIC_STA_STA_GET(channel_select_logic_conc)  \
+	((channel_select_logic_conc & WMA_FW_MODE_STA_STA_BIT_MASK) >>   \
+	 WMA_FW_MODE_STA_STA_BIT_POS)
+#define WMA_CHANNEL_SELECT_LOGIC_STA_P2P_GET(channel_select_logic_conc)  \
+	((channel_select_logic_conc & WMA_FW_MODE_STA_P2P_BIT_MASK) >>   \
+	 WMA_FW_MODE_STA_P2P_BIT_POS)
 
 /**
  * ds_mode: distribution system mode
@@ -417,7 +421,6 @@ enum ds_mode {
 
 #define WMA_DEFAULT_QPOWER_MAX_PSPOLL_BEFORE_WAKE 1
 #define WMA_DEFAULT_QPOWER_TX_WAKE_THRESHOLD 2
-#define WMA_DEFAULT_SIFS_BURST_DURATION      8160
 
 #define WMA_VHT_PPS_PAID_MATCH 1
 #define WMA_VHT_PPS_GID_MATCH 2
@@ -562,9 +565,6 @@ static const t_probeTime_dwellTime
 };
 
 typedef void (*txFailIndCallback)(uint8_t *peer_mac, uint8_t seqNo);
-typedef void (*encrypt_decrypt_cb)(struct sir_encrypt_decrypt_rsp_params
-		*encrypt_decrypt_rsp_params);
-
 
 typedef void (*tp_wma_packetdump_cb)(qdf_nbuf_t netbuf,
 			uint8_t status, uint8_t vdev_id, uint8_t type);
@@ -823,8 +823,6 @@ typedef struct {
  * @rxchainmask: rx chain mask
  * @txpow2g: tx power limit for 2GHz
  * @txpow5g: tx power limit for 5GHz
- * @burst_enable: is burst enable/disable
- * @burst_dur: burst duration
  *
  * This structure stores pdev parameters.
  * Some of these parameters are set in fw and some
@@ -842,8 +840,6 @@ typedef struct {
 	uint32_t rxchainmask;
 	uint32_t txpow2g;
 	uint32_t txpow5g;
-	uint32_t burst_enable;
-	uint32_t burst_dur;
 } pdev_cli_config_t;
 
 /**
@@ -957,16 +953,18 @@ typedef struct {
  * @key_length: key length
  * @key: key
  * @key_id: key id
+ * @key_cipher: key cipher
  */
 typedef struct {
 	uint16_t key_length;
-	uint8_t key[CSR_AES_KEY_LEN];
+	uint8_t key[CSR_AES_GMAC_256_KEY_LEN];
 
 	/* IPN is maintained per iGTK keyID
 	 * 0th index for iGTK keyID = 4;
 	 * 1st index for iGTK KeyID = 5
 	 */
 	wma_igtk_ipn_t key_id[2];
+	uint32_t key_cipher;
 } wma_igtk_key_t;
 #endif
 
@@ -1035,6 +1033,7 @@ struct roam_synch_frame_ind {
  * @aid: association id
  * @rmfEnabled: Robust Management Frame (RMF) enabled/disabled
  * @key: GTK key
+ * @ucast_key_cipher: unicast cipher key
  * @uapsd_cached_val: uapsd cached value
  * @stats_rsp: stats response
  * @fw_stats_set: fw stats value
@@ -1071,6 +1070,7 @@ struct roam_synch_frame_ind {
  * @vdev_stop_wakelock: wakelock to protect vdev stop op with firmware
  * @vdev_set_key_wakelock: wakelock to protect vdev set key op with firmware
  * @channel: channel
+ * @roam_scan_stats_req: cached roam scan stats request
  */
 struct wma_txrx_node {
 	uint8_t addr[IEEE80211_ADDR_LEN];
@@ -1110,6 +1110,7 @@ struct wma_txrx_node {
 	uint8_t rmfEnabled;
 #ifdef WLAN_FEATURE_11W
 	wma_igtk_key_t key;
+	uint32_t ucast_key_cipher;
 #endif /* WLAN_FEATURE_11W */
 	uint32_t uapsd_cached_val;
 	tAniGetPEStatsRsp *stats_rsp;
@@ -1162,6 +1163,7 @@ struct wma_txrx_node {
 	struct roam_synch_frame_ind roam_synch_frame_ind;
 	bool is_waiting_for_key;
 	uint8_t channel;
+	struct sir_roam_scan_stats *roam_scan_stats_req;
 };
 
 #if defined(QCA_WIFI_FTM)
@@ -1342,6 +1344,7 @@ struct hw_mode_idx_to_mac_cap_idx {
  * @each_phy_cap_per_hwmode: PHY's caps for each hw mode
  * @num_phy_for_hal_reg_cap: number of phy for hal reg cap
  * @hw_mode_to_mac_cap_map: map between hw_mode to capabilities
+ * @sar_capability: supported SAR versions
  */
 struct extended_caps {
 	WMI_SOC_MAC_PHY_HW_MODE_CAPS num_hw_modes;
@@ -1350,6 +1353,7 @@ struct extended_caps {
 	WMI_SOC_HAL_REG_CAPABILITIES num_phy_for_hal_reg_cap;
 	WMI_HAL_REG_CAPABILITIES_EXT *each_phy_hal_reg_cap;
 	struct hw_mode_idx_to_mac_cap_idx *hw_mode_to_mac_cap_map;
+	WMI_SAR_CAPABILITIES sar_capability;
 };
 
 /**
@@ -1521,10 +1525,10 @@ struct peer_debug_info {
  * It contains global wma module parameters and
  * handle of other modules.
  * @saved_wmi_init_cmd: Saved WMI INIT command
- * @bpf_packet_filter_enable: BPF filter enabled or not
- * @active_uc_bpf_mode: Setting that determines how BPF is applied in active
+ * @apf_packet_filter_enable: APF filter enabled or not
+ * @active_uc_apf_mode: Setting that determines how APF is applied in active
  * mode for uc packets
- * @active_mc_bc_bpf_mode: Setting that determines how BPF is applied in
+ * @active_mc_bc_apf_mode: Setting that determines how APF is applied in
  * active mode for MC/BC packets
  * @service_ready_ext_evt: Wait event for service ready ext
  * @wmi_cmd_rsp_wake_lock: wmi command response wake lock
@@ -1726,10 +1730,10 @@ typedef struct {
 	qdf_runtime_lock_t wmi_cmd_rsp_runtime_lock;
 	qdf_runtime_lock_t wma_runtime_resume_lock;
 	uint32_t fine_time_measurement_cap;
-	bool bpf_enabled;
-	bool bpf_packet_filter_enable;
-	enum active_bpf_mode active_uc_bpf_mode;
-	enum active_bpf_mode active_mc_bc_bpf_mode;
+	bool apf_enabled;
+	bool apf_packet_filter_enable;
+	enum active_apf_mode active_uc_apf_mode;
+	enum active_apf_mode active_mc_bc_apf_mode;
 	struct wma_ini_config ini_config;
 	struct wma_valid_channels saved_chan;
 	/* NAN datapath support enabled in firmware */
@@ -2208,6 +2212,7 @@ typedef struct wma_tdls_params {
 	uint32_t puapsd_rx_frame_threshold;
 	uint32_t teardown_notification_ms;
 	uint32_t tdls_peer_kickout_threshold;
+	uint32_t tdls_discovery_wake_timeout;
 } t_wma_tdls_params;
 
 /**
@@ -2445,13 +2450,83 @@ void wma_process_fw_test_cmd(WMA_HANDLE handle,
 QDF_STATUS wma_send_ht40_obss_scanind(tp_wma_handle wma,
 	struct obss_ht40_scanind *req);
 
-int wma_get_bpf_caps_event_handler(void *handle,
+uint32_t wma_get_num_of_setbits_from_bitmask(uint32_t mask);
+
+/**
+ *  wma_get_apf_caps_event_handler() - Event handler for get apf capability
+ *  @handle: WMA global handle
+ *  @cmd_param_info: command event data
+ *  @len: Length of @cmd_param_info
+ *
+ *  Return: 0 on Success or Errno on failure
+ */
+int wma_get_apf_caps_event_handler(void *handle,
 				u_int8_t *cmd_param_info,
 				u_int32_t len);
-uint32_t wma_get_num_of_setbits_from_bitmask(uint32_t mask);
-QDF_STATUS wma_get_bpf_capabilities(tp_wma_handle wma);
-QDF_STATUS wma_set_bpf_instructions(tp_wma_handle wma,
-			struct sir_bpf_set_offload *bpf_set_offload);
+
+/**
+ * wma_get_apf_capabilities - Send get apf capability to firmware
+ * @wma_handle: wma handle
+ * @context: APF context
+ *
+ * Return: QDF_STATUS enumeration.
+ */
+QDF_STATUS wma_get_apf_capabilities(tp_wma_handle wma, void *context);
+
+/**
+ *  wma_set_apf_instructions - Set apf instructions to firmware
+ *  @wma: wma handle
+ *  @apf_set_offload: APF offload information to set to firmware
+ *
+ *  Return: QDF_STATUS enumeration
+ */
+QDF_STATUS wma_set_apf_instructions(tp_wma_handle wma,
+			struct sir_apf_set_offload *apf_set_offload);
+
+/**
+ * wma_send_apf_enable_cmd - Send apf enable/disable cmd
+ * @wma_handle: wma handle
+ * @vdev_id: vdev id
+ * @apf_enable: true: Enable APF Int., false: Disable APF Int.
+ *
+ * Return: QDF_STATUS enumeration.
+ */
+QDF_STATUS wma_send_apf_enable_cmd(WMA_HANDLE handle, uint8_t vdev_id,
+				   bool apf_enable);
+
+/**
+ * wma_send_apf_write_work_memory_cmd - Command to write into the apf work memory
+ * @wma_handle: wma handle
+ * @write_params: APF parameters for the write operation
+ *
+ * Return: QDF_STATUS enumeration.
+ */
+QDF_STATUS wma_send_apf_write_work_memory_cmd(WMA_HANDLE handle,
+			struct wmi_apf_write_memory_params *write_params);
+
+/**
+ * wma_send_apf_read_work_memory_cmd - Command to get part of apf work memory
+ * @wma_handle: wma handle
+ * @callback: HDD callback to receive apf get mem event
+ * @context: Context for the HDD callback
+ * @read_params: APF parameters for the get operation
+ *
+ * Return: QDF_STATUS enumeration.
+ */
+QDF_STATUS wma_send_apf_read_work_memory_cmd(WMA_HANDLE handle,
+			 struct wmi_apf_read_memory_params *read_params);
+
+/**
+ * wma_apf_read_work_memory_event_handler - Event handler for get apf mem operation
+ * @handle: wma handle
+ * @evt_buf: Buffer pointer to the event
+ * @len: Length of the event buffer
+ *
+ * Return: status.
+ */
+int wma_apf_read_work_memory_event_handler(void *handle, uint8_t *evt_buf,
+				       uint32_t len);
+
 void wma_process_set_pdev_ie_req(tp_wma_handle wma,
 		struct set_ie_param *ie_params);
 void wma_process_set_pdev_ht_ie_req(tp_wma_handle wma,
@@ -2554,14 +2629,6 @@ void wma_set_sap_wow_bitmask(uint32_t *bitmask, uint32_t wow_bitmask_size);
  */
 bool wma_is_wow_bitmask_zero(uint32_t *bitmask,
 			     uint32_t wow_bitmask_size);
-/**
- * chanmode_to_chanwidth() - get channel width through channel mode
- * @chanmode:   channel phy mode
- *
- * Return: channel width
- */
-wmi_channel_width chanmode_to_chanwidth(WLAN_PHY_MODE chanmode);
-
 /**
  * wma_process_roaming_config() - process roam request
  * @wma_handle: wma handle
@@ -2728,5 +2795,11 @@ QDF_STATUS wma_config_bmiss_bcnt_params(uint32_t vdev_id, uint32_t first_cnt,
  */
 QDF_STATUS wma_send_action_oui(WMA_HANDLE handle,
 			       struct wmi_action_oui *action_oui);
-
+/**
+ * chanmode_to_chanwidth() - get channel width through channel mode
+ * @chanmode:   channel phy mode
+ *
+ * Return: channel width
+ */
+wmi_channel_width chanmode_to_chanwidth(WLAN_PHY_MODE chanmode);
 #endif

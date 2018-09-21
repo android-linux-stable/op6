@@ -1,8 +1,5 @@
 /*
- * Copyright (c) 2013-2017 The Linux Foundation. All rights reserved.
- *
- * Previously licensed under the ISC license by Qualcomm Atheros, Inc.
- *
+ * Copyright (c) 2013-2018 The Linux Foundation. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -17,12 +14,6 @@
  * PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER
  * TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR
  * PERFORMANCE OF THIS SOFTWARE.
- */
-
-/*
- * This file was originally distributed by Qualcomm Atheros, Inc.
- * under proprietary terms before Copyright ownership was assigned
- * to the Linux Foundation.
  */
 
 /**
@@ -44,11 +35,7 @@
 #include "cfg_api.h"
 #include "ol_txrx_ctrl_api.h"
 #include <cdp_txrx_tx_throttle.h>
-#if defined(CONFIG_HL_SUPPORT)
-#include "wlan_tgt_def_config_hl.h"
-#else
-#include "wlan_tgt_def_config.h"
-#endif
+#include "target_if_def_config.h"
 #include "ol_txrx.h"
 #include "qdf_nbuf.h"
 #include "qdf_types.h"
@@ -1228,6 +1215,7 @@ void wma_set_linkstate(tp_wma_handle wma, tpLinkStateParams params)
 			WMA_LOGP(FL("Failed to fill vdev request for vdev_id %d"),
 				 vdev_id);
 			params->status = false;
+			goto out;
 		}
 
 		status = wma_send_vdev_stop_to_fw(wma, vdev_id);
@@ -2682,11 +2670,20 @@ QDF_STATUS wma_tx_packet(void *wma_context, void *tx_frame, uint16_t frmLen,
 		if (!IEEE80211_IS_BROADCAST(wh->i_addr1) &&
 		    !IEEE80211_IS_MULTICAST(wh->i_addr1)) {
 			if (pFc->wep) {
+				uint8_t mic_len, hdr_len;
+
 				/* Allocate extra bytes for privacy header and
 				 * trailer
 				 */
-				newFrmLen = frmLen + IEEE80211_CCMP_HEADERLEN +
-					    IEEE80211_CCMP_MICLEN;
+				if (iface->ucast_key_cipher ==
+				    WMI_CIPHER_AES_GCM) {
+					hdr_len = WLAN_IEEE80211_GCMP_HEADERLEN;
+					mic_len = WLAN_IEEE80211_GCMP_MICLEN;
+				} else {
+					hdr_len = IEEE80211_CCMP_HEADERLEN;
+					mic_len = IEEE80211_CCMP_MICLEN;
+				}
+				newFrmLen = frmLen + hdr_len + mic_len;
 				qdf_status =
 					cds_packet_alloc((uint16_t) newFrmLen,
 							 (void **)&pFrame,
@@ -2709,7 +2706,7 @@ QDF_STATUS wma_tx_packet(void *wma_context, void *tx_frame, uint16_t frmLen,
 				qdf_mem_set(pFrame, newFrmLen, 0);
 				qdf_mem_copy(pFrame, wh, sizeof(*wh));
 				qdf_mem_copy(pFrame + sizeof(*wh) +
-					     IEEE80211_CCMP_HEADERLEN,
+					     hdr_len,
 					     pData + sizeof(*wh),
 					     frmLen - sizeof(*wh));
 
@@ -2902,12 +2899,8 @@ QDF_STATUS wma_tx_packet(void *wma_context, void *tx_frame, uint16_t frmLen,
 					tx_frm_ota_comp_cb;
 			}
 		} else {
-			if (downld_comp_required)
-				tx_frm_index =
-					GENERIC_DOWNLD_COMP_NOACK_COMP_INDEX;
-			else
-				tx_frm_index =
-					GENERIC_NODOWNLD_NOACK_COMP_INDEX;
+			tx_frm_index =
+				GENERIC_NODOWNLD_NOACK_COMP_INDEX;
 		}
 	}
 

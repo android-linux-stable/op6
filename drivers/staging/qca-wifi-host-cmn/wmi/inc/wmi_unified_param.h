@@ -1,9 +1,6 @@
 /*
  * Copyright (c) 2016-2018 The Linux Foundation. All rights reserved.
  *
- * Previously licensed under the ISC license by Qualcomm Atheros, Inc.
- *
- *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
  * above copyright notice and this permission notice appear in all
@@ -17,12 +14,6 @@
  * PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER
  * TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR
  * PERFORMANCE OF THIS SOFTWARE.
- */
-
-/*
- * This file was originally distributed by Qualcomm Atheros, Inc.
- * under proprietary terms before Copyright ownership was assigned
- * to the Linux Foundation.
  */
 
 /*
@@ -75,6 +66,7 @@
 #define WMI_ROAM_SCAN_PSK_SIZE    32
 #endif
 #define WMI_NOISE_FLOOR_DBM_DEFAULT      (-96)
+#define WMI_INVALID_PER_CHAIN_RSSI       0x80
 #define WMI_MAC_IPV6_ADDR_LEN                            16
 #define WMI_OFFLOAD_DISABLE                         0
 #define WMI_OFFLOAD_ENABLE                          1
@@ -796,6 +788,8 @@ struct beacon_tmpl_params {
  * struct beacon_params - beacon cmd parameter
  * @vdev_id: vdev id
  * @tim_ie_offset: tim ie offset
+ * @csa_count_offset: Offset of Switch count field in CSA IE
+ * @ecsa_count_offset: Offset of Switch count field in ECSA IE
  * @tmpl_len: beacon template length
  * @tmpl_len_aligned: beacon template alignment
  * @frm: beacon template parameter
@@ -803,6 +797,8 @@ struct beacon_tmpl_params {
 struct beacon_params {
 	uint8_t vdev_id;
 	uint32_t tim_ie_offset;
+	uint32_t csa_count_offset;
+	uint32_t ecsa_count_offset;
 	uint32_t tmpl_len;
 	uint32_t tmpl_len_aligned;
 	uint8_t *frm;
@@ -1824,6 +1820,7 @@ typedef struct {
 	uint32_t wmm_caps;
 	/* since this is 4 byte aligned, we don't declare it as tlv array */
 	uint32_t mcsset[WMI_HOST_ROAM_OFFLOAD_NUM_MCS_SET >> 2];
+	uint32_t ho_delay_for_rx;
 } roam_offload_param;
 
 #define WMI_FILS_MAX_RRK_LENGTH 64
@@ -1867,6 +1864,8 @@ struct roam_fils_params {
  * @prefer_5ghz: prefer select 5G candidate
  * @roam_rssi_cat_gap: gap for every category bucket
  * @select_5ghz_margin: select 5 Ghz margin
+ * @min_delay_btw_roam_scans: Delay btw two roam scans
+ * @roam_trigger_reason_bitmask: Roam reason bitmark
  * @krk: KRK
  * @btk: BTK
  * @reassoc_failure_timeout: reassoc failure timeout
@@ -1905,6 +1904,8 @@ struct roam_offload_scan_params {
 	bool fw_okc;
 	bool fw_pmksa_cache;
 #endif
+	uint32_t min_delay_btw_roam_scans;
+	uint32_t roam_trigger_reason_bitmask;
 	bool is_ese_assoc;
 	bool is_11r_assoc;
 	struct mobility_domain_info mdid;
@@ -3230,6 +3231,7 @@ struct wmi_tdls_params {
 	uint32_t puapsd_rx_frame_threshold;
 	uint32_t teardown_notification_ms;
 	uint32_t tdls_peer_kickout_threshold;
+	uint32_t tdls_discovery_wake_timeout;
 };
 
 /**
@@ -3403,6 +3405,7 @@ struct periodic_tx_pattern {
  * @kek_len: Kek length
  * @ullKeyReplayCounter: replay counter
  * @bssid: bss id
+ * @is_fils_connection: Whether the present connection with the AP is FILS
  */
 struct gtk_offload_params {
 	uint32_t ulFlags;
@@ -3411,6 +3414,7 @@ struct gtk_offload_params {
 	uint32_t kek_len;
 	uint64_t ullKeyReplayCounter;
 	struct qdf_mac_addr bssid;
+	bool is_fils_connection;
 };
 
 /**
@@ -5299,7 +5303,8 @@ typedef enum {
 	wmi_update_rcpi_event_id,
 	wmi_get_arp_stats_req_id,
 	wmi_sar_get_limits_event_id,
-
+	wmi_roam_scan_stats_event_id,
+	wmi_wlan_sar2_result_event_id,
 	wmi_events_max,
 } wmi_conv_event_id;
 
@@ -7376,13 +7381,19 @@ struct action_wakeup_set_param {
  * @WMI_ACTION_OUI_CONNECT_1X1: for 1x1 connection only
  * @WMI_ACTION_OUI_ITO_EXTENSION: for extending inactivity time of station
  * @WMI_ACTION_OUI_CCKM_1X1: for TX with CCKM 1x1 only
+ * @WMI_ACTION_OUI_ITO_ALTERNATE: for alternate inactivity time of station
+ * WMI_ACTION_OUI_SWITCH_TO_11N_MODE: for switching to 11n mode connection
+ * WMI_ACTION_OUI_CONNECT_1x1_WITH_1_CHAIN: for 1x1 connection with 1 Chain
  * @WMI_ACTION_OUI_MAXIMUM_ID: maximun number of action oui types
  */
 enum wmi_action_oui_id {
 	WMI_ACTION_OUI_CONNECT_1X1 = 0,
 	WMI_ACTION_OUI_ITO_EXTENSION = 1,
 	WMI_ACTION_OUI_CCKM_1X1 = 2,
-	WMI_ACTION_OUI_MAXIMUM_ID = 3,
+	WMI_ACTION_OUI_ITO_ALTERNATE = 3,
+	WMI_ACTION_OUI_SWITCH_TO_11N_MODE = 4,
+	WMI_ACTION_OUI_CONNECT_1x1_WITH_1_CHAIN = 5,
+	WMI_ACTION_OUI_MAXIMUM_ID = 6,
 };
 
 /**
@@ -7550,6 +7561,184 @@ struct wmi_mawc_roam_params {
 };
 
 /**
+ * @time_offset: time offset after 11k offload command to trigger a neighbor
+ *	report request (in seconds)
+ * @low_rssi_offset: Offset from rssi threshold to trigger a neighbor
+ *	report request (in dBm)
+ * @bmiss_count_trigger: Number of beacon miss events to trigger neighbor
+ *	report request
+ * @per_threshold_offset: offset from PER threshold to trigger neighbor
+ *	report request (in %)
+ * @neighbor_report_cache_timeout: timeout after which new trigger can enable
+ *	sending of a neighbor report request (in seconds)
+ * @max_neighbor_report_req_cap: max number of neighbor report requests that
+ *	can be sent to the peer in the current session
+ * @ssid: Current connect SSID info
+ */
+struct wmi_11k_offload_neighbor_report_params {
+	uint32_t time_offset;
+	uint32_t low_rssi_offset;
+	uint32_t bmiss_count_trigger;
+	uint32_t per_threshold_offset;
+	uint32_t neighbor_report_cache_timeout;
+	uint32_t max_neighbor_report_req_cap;
+	struct mac_ssid ssid;
+};
+
+/**
+ * struct wmi_11k_offload_params - offload 11k features to FW
+ * @vdev_id: vdev id
+ * @offload_11k_bitmask: bitmask to specify offloaded features
+ *	B0: Neighbor Report Request offload
+ *	B1-B31: Reserved
+ * @neighbor_report_params: neighbor report offload params
+ */
+struct wmi_11k_offload_params {
+	uint32_t vdev_id;
+	uint32_t offload_11k_bitmask;
+	struct wmi_11k_offload_neighbor_report_params neighbor_report_params;
+};
+
+/**
+ * struct wmi_invoke_neighbor_report_params - Invoke neighbor report request
+ *	from IW to FW
+ * @vdev_id: vdev id
+ * @send_resp_to_host: bool to send response to host or not
+ * @ssid: ssid given from the IW command
+ */
+struct wmi_invoke_neighbor_report_params {
+	uint32_t vdev_id;
+	uint32_t send_resp_to_host;
+	struct mac_ssid ssid;
+};
+
+/**
+ * struct wmi_apf_write_memory_params - Android Packet Filter write memory
+ * params
+ * @vdev_id: VDEV on which APF memory is to be written
+ * @apf_version: APF version number
+ * @program_len: Length reserved for program in the APF work memory
+ * @addr_offset: Relative address in APF work memory to start writing
+ * @length: Size of the write
+ * @buf: Pointer to the buffer
+ */
+struct wmi_apf_write_memory_params {
+	uint8_t vdev_id;
+	uint32_t apf_version;
+	uint32_t program_len;
+	uint32_t addr_offset;
+	uint32_t length;
+	uint8_t *buf;
+};
+
+/**
+ * struct wmi_apf_read_memory_params - Android Packet Filter read memory params
+ * @vdev_id: vdev id
+ * @addr_offset: Relative address in APF work memory to read from
+ * @length: Size of the memory fetch
+ */
+struct wmi_apf_read_memory_params {
+	uint8_t vdev_id;
+	uint32_t addr_offset;
+	uint32_t length;
+};
+
+/**
+ * struct wmi_apf_read_memory_resp_event_params - Event containing read Android
+ *	Packet Filter memory response
+ * @vdev_id: vdev id
+ * @offset: Read memory offset
+ * @length: Read memory length
+ * @more_data: Indicates more data to come
+ * @data: Pointer to the data
+ */
+struct wmi_apf_read_memory_resp_event_params {
+	uint32_t vdev_id;
+	uint32_t offset;
+	uint32_t length;
+	bool more_data;
+	uint8_t *data;
+};
+
+/* Begin of roam scan stats definitions */
+
+#define WMI_ROAM_SCAN_STATS_MAX             5
+#define WMI_ROAM_SCAN_STATS_CANDIDATES_MAX  4
+#define WMI_ROAM_SCAN_STATS_CHANNELS_MAX    50
+
+/**
+ * struct wmi_roam_scan_stats_req - Structure to hold roam scan stats request
+ * @vdev_id: interface id
+ */
+struct wmi_roam_scan_stats_req {
+	uint32_t vdev_id;
+};
+
+/**
+ * struct wmi_roam_scan_cand - Roam scan candidates
+ * @score: score of AP
+ * @rssi: rssi of the AP
+ * @freq: center frequency
+ * @bssid: bssid of AP
+ */
+struct wmi_roam_scan_cand {
+	uint32_t score;
+	uint32_t rssi;
+	uint32_t freq;
+	uint8_t  bssid[QDF_MAC_ADDR_SIZE];
+};
+
+/**
+ * struct wmi_roam_scan_stats_params - Roam scan details
+ * @time_stamp: time at which this roam scan happened
+ * @client_id: id of client which triggered this scan
+ * @num_scan_chans: number of channels that were scanned as part of this scan
+ * @scan_freqs: frequencies of the channels that were scanned
+ * @is_roam_successful: whether a successful roaming happened after this scan
+ * @old_bssid: bssid to which STA is connected just before this scan
+ * @new_bssid: bssid to which STA is roamed to in case of successful roaming
+ * @num_roam_candidates: no.of roam candidates that are being reported
+ * @roam_candidate: roam scan candidate details
+ * @trigger_id: reason for triggering this roam or roam scan
+ * @trigger_value: threshold value related to trigger_id
+ */
+struct wmi_roam_scan_stats_params {
+	uint64_t time_stamp;
+	uint32_t client_id;
+	uint32_t num_scan_chans;
+	uint32_t scan_freqs[WMI_ROAM_SCAN_STATS_CHANNELS_MAX];
+	uint32_t is_roam_successful;
+
+	/* Bssid to which STA is connected when the roam scan is triggered */
+	uint8_t  old_bssid[QDF_MAC_ADDR_SIZE];
+
+	/*
+	 * Bssid to which STA is connected after roaming. Will be valid only
+	 * if is_roam_successful is true.
+	 */
+	uint8_t  new_bssid[QDF_MAC_ADDR_SIZE];
+
+	/* Number of roam candidates that are being reported in the stats */
+	uint32_t num_roam_candidates;
+	struct wmi_roam_scan_cand cand[WMI_ROAM_SCAN_STATS_CANDIDATES_MAX];
+	uint32_t trigger_id;
+	uint32_t trigger_value;
+};
+
+/**
+ * struct wmi_roam_scan_stats_res - Roam scan stats response from firmware
+ * @num_roam_scan: number of roam scans triggered
+ * @roam_scan: place holder to indicate the array of
+ *             wmi_roam_scan_stats_params followed by this structure
+ */
+struct wmi_roam_scan_stats_res {
+	uint32_t num_roam_scans;
+	struct wmi_roam_scan_stats_params roam_scan[0];
+};
+
+/* End of roam scan stats definitions */
+
+/**
  * struct wmi_hw_filter_req_params - HW Filter mode parameters
  * @vdev: VDEV id
  * @enable: True: Enable HW filter, False: Disable
@@ -7562,6 +7751,5 @@ struct wmi_hw_filter_req_params {
 	uint8_t mode_bitmap;
 	struct qdf_mac_addr bssid;
 };
-
 #endif /* _WMI_UNIFIED_PARAM_H_ */
 

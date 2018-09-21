@@ -1,8 +1,5 @@
 /*
- * Copyright (c) 2011-2017 The Linux Foundation. All rights reserved.
- *
- * Previously licensed under the ISC license by Qualcomm Atheros, Inc.
- *
+ * Copyright (c) 2011-2018 The Linux Foundation. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -17,12 +14,6 @@
  * PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER
  * TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR
  * PERFORMANCE OF THIS SOFTWARE.
- */
-
-/*
- * This file was originally distributed by Qualcomm Atheros, Inc.
- * under proprietary terms before Copyright ownership was assigned
- * to the Linux Foundation.
  */
 
 /*
@@ -899,6 +890,7 @@ tSirRetStatus pe_start(tpAniSirGlobal pMac)
 void pe_stop(tpAniSirGlobal pMac)
 {
 	lim_cleanup(pMac);
+	pe_debug(" PE STOP: Set LIM state to eLIM_MLM_OFFLINE_STATE");
 	SET_LIM_MLM_STATE(pMac, eLIM_MLM_OFFLINE_STATE);
 	return;
 }
@@ -907,6 +899,7 @@ static void pe_free_nested_messages(tSirMsgQ *msg)
 {
 	switch (msg->type) {
 	case WMA_SET_LINK_STATE_RSP:
+		pe_debug("pe_free_nested_messages: WMA_SET_LINK_STATE_RSP");
 		qdf_mem_free(((tpLinkStateParams) msg->bodyptr)->callbackArg);
 		break;
 	default:
@@ -1141,24 +1134,6 @@ static QDF_STATUS pe_handle_mgmt_frame(void *p_cds_gctx, void *cds_buff)
 	 */
 
 	mHdr = WMA_GET_RX_MAC_HEADER(pRxPacketInfo);
-	if (mHdr->fc.type == SIR_MAC_MGMT_FRAME) {
-		pe_debug("RxBd: %pK mHdr: %pK Type: %d Subtype: %d  SizesFC: %zu Mgmt: %zu",
-		  pRxPacketInfo, mHdr, mHdr->fc.type, mHdr->fc.subType,
-		  sizeof(tSirMacFrameCtl), sizeof(tSirMacMgmtHdr));
-
-		pe_debug("mpdu_len: %d hdr_len: %d data_len: %d",
-		       WMA_GET_RX_MPDU_LEN(pRxPacketInfo),
-		       WMA_GET_RX_MPDU_HEADER_LEN(pRxPacketInfo),
-		       WMA_GET_RX_PAYLOAD_LEN(pRxPacketInfo));
-
-		if (WMA_GET_ROAMCANDIDATEIND(pRxPacketInfo))
-			pe_debug("roamCandidateInd: %d",
-				WMA_GET_ROAMCANDIDATEIND(pRxPacketInfo));
-
-		if (WMA_GET_OFFLOADSCANLEARN(pRxPacketInfo))
-			pe_debug("offloadScanLearn: %d",
-				 WMA_GET_OFFLOADSCANLEARN(pRxPacketInfo));
-	}
 
 	if (QDF_STATUS_SUCCESS !=
 	    pe_drop_pending_rx_mgmt_frames(pMac, mHdr, pVosPkt))
@@ -1570,19 +1545,18 @@ lim_detect_change_in_ap_capabilities(tpAniSirGlobal pMac,
 			 * then send unicast probe request to AP and take decision after
 			 * receiving probe response */
 			if (true == psessionEntry->fIgnoreCapsChange) {
-				pe_warn("Ignoring the Capability change as it is false alarm");
+				pe_debug("Ignoring the Capability change as it is false alarm");
 				return;
 			}
 			psessionEntry->fWaitForProbeRsp = true;
 			pe_warn("AP capabilities are not matching, sending directed probe request");
 			status =
 				lim_send_probe_req_mgmt_frame(pMac, &psessionEntry->ssId,
-							      psessionEntry->bssId,
-							      psessionEntry->
-							      currentOperChannel,
-							      psessionEntry->selfMacAddr,
-							      psessionEntry->dot11mode,
-							      0, NULL);
+					      psessionEntry->bssId,
+					      psessionEntry->currentOperChannel,
+					      psessionEntry->selfMacAddr,
+					      psessionEntry->dot11mode,
+					      NULL, NULL);
 
 			if (eSIR_SUCCESS != status) {
 				pe_err("send ProbeReq failed");
@@ -2029,6 +2003,21 @@ static inline void lim_copy_and_free_hlp_data_from_session(
 {}
 #endif
 
+static const char *pe_roam_op_code_to_string(uint8_t roam_op_code)
+{
+	switch (roam_op_code) {
+	CASE_RETURN_STRING(SIR_ROAM_SYNCH_PROPAGATION);
+	CASE_RETURN_STRING(SIR_ROAMING_DEREGISTER_STA);
+	CASE_RETURN_STRING(SIR_ROAMING_START);
+	CASE_RETURN_STRING(SIR_ROAMING_ABORT);
+	CASE_RETURN_STRING(SIR_ROAM_SYNCH_COMPLETE);
+	CASE_RETURN_STRING(SIR_ROAM_SYNCH_NAPI_OFF);
+	CASE_RETURN_STRING(SIR_ROAMING_INVOKE_FAIL);
+	default:
+		return "none";
+	}
+}
+
 /**
  * pe_roam_synch_callback() - PE level callback for roam synch propagation
  * @mac_ctx: MAC Context
@@ -2071,7 +2060,8 @@ QDF_STATUS pe_roam_synch_callback(tpAniSirGlobal mac_ctx,
 		return status;
 	}
 
-	pe_debug("LFR3: PE callback reason: %d", reason);
+	pe_debug("LFR3: PE callback reason: %d %s", reason,
+				pe_roam_op_code_to_string(reason));
 	switch (reason) {
 	case SIR_ROAMING_START:
 		session_ptr->fw_roaming_started = true;
@@ -2103,10 +2093,6 @@ QDF_STATUS pe_roam_synch_callback(tpAniSirGlobal mac_ctx,
 		return status;
 	}
 
-	pe_debug("LFR3:Received WMA_ROAM_OFFLOAD_SYNCH_IND LFR3:auth: %d vdevId: %d",
-		roam_sync_ind_ptr->authStatus, roam_sync_ind_ptr->roamedVdevId);
-	lim_print_mac_addr(mac_ctx, roam_sync_ind_ptr->bssid.bytes,
-			QDF_TRACE_LEVEL_DEBUG);
 	/*
 	 * If deauth from AP already in progress, ignore Roam Synch Indication
 	 * from firmware.
@@ -2347,29 +2333,17 @@ tMgmtFrmDropReason lim_is_pkt_candidate_for_drop(tpAniSirGlobal pMac,
 	if ((subType == SIR_MAC_MGMT_BEACON) ||
 	    (subType == SIR_MAC_MGMT_PROBE_RSP)) {
 		if (lim_is_beacon_miss_scenario(pMac, pRxPacketInfo)) {
-			MTRACE(mac_trace
-				       (pMac, TRACE_CODE_INFO_LOG, 0,
-				       eLOG_NODROP_MISSED_BEACON_SCENARIO));
+			MTRACE(mac_trace(pMac, TRACE_CODE_INFO_LOG, 0,
+					 eLOG_NODROP_MISSED_BEACON_SCENARIO));
 			return eMGMT_DROP_NO_DROP;
 		}
-		if (lim_is_system_in_scan_state(pMac)) {
+		if (lim_is_system_in_scan_state(pMac))
 			return eMGMT_DROP_NO_DROP;
-		} else if (WMA_IS_RX_IN_SCAN(pRxPacketInfo)) {
+		else if (WMA_IS_RX_IN_SCAN(pRxPacketInfo))
 			return eMGMT_DROP_SCAN_MODE_FRAME;
-		} else {
-			/* Beacons and probe responses can come in any time
-			 * because of parallel scans. Don't drop them.
-			 */
-			return eMGMT_DROP_NO_DROP;
-		}
-	}
 
-	framelen = WMA_GET_RX_PAYLOAD_LEN(pRxPacketInfo);
-	pBody = WMA_GET_RX_MPDU_DATA(pRxPacketInfo);
-
-	/* Drop INFRA Beacons and Probe Responses in IBSS Mode */
-	if ((subType == SIR_MAC_MGMT_BEACON) ||
-	    (subType == SIR_MAC_MGMT_PROBE_RSP)) {
+		framelen = WMA_GET_RX_PAYLOAD_LEN(pRxPacketInfo);
+		pBody = WMA_GET_RX_MPDU_DATA(pRxPacketInfo);
 		/* drop the frame if length is less than 12 */
 		if (framelen < LIM_MIN_BCN_PR_LENGTH)
 			return eMGMT_DROP_INVALID_SIZE;
@@ -2383,14 +2357,17 @@ tMgmtFrmDropReason lim_is_pkt_candidate_for_drop(tpAniSirGlobal pMac,
 		if (!capabilityInfo.ibss)
 			return eMGMT_DROP_NO_DROP;
 
+		/* Drop INFRA Beacons and Probe Responses in IBSS Mode */
 		/* This can be enhanced to even check the SSID before deciding to enque the frame. */
 		if (capabilityInfo.ess)
 			return eMGMT_DROP_INFRA_BCN_IN_IBSS;
+
 	} else if ((subType == SIR_MAC_MGMT_PROBE_REQ) &&
 		   (!WMA_GET_RX_BEACON_SENT(pRxPacketInfo))) {
 		pHdr = WMA_GET_RX_MAC_HEADER(pRxPacketInfo);
-		psessionEntry =
-			pe_find_session_by_bssid(pMac, pHdr->bssId, &sessionId);
+		psessionEntry = pe_find_session_by_bssid(pMac,
+							 pHdr->bssId,
+							 &sessionId);
 		if ((psessionEntry && !LIM_IS_IBSS_ROLE(psessionEntry)) ||
 		    (!psessionEntry))
 			return eMGMT_DROP_NO_DROP;

@@ -1,9 +1,6 @@
 /*
  * Copyright (c) 2013-2018 The Linux Foundation. All rights reserved.
  *
- * Previously licensed under the ISC license by Qualcomm Atheros, Inc.
- *
- *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
  * above copyright notice and this permission notice appear in all
@@ -17,12 +14,6 @@
  * PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER
  * TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR
  * PERFORMANCE OF THIS SOFTWARE.
- */
-
-/*
- * This file was originally distributed by Qualcomm Atheros, Inc.
- * under proprietary terms before Copyright ownership was assigned
- * to the Linux Foundation.
  */
 
 /**=========================================================================
@@ -425,6 +416,9 @@ uint8_t *mac_trace_get_sme_msg_string(uint16_t sme_msg)
 		CASE_RETURN_STRING(eWNI_SME_GET_PEER_INFO_IND);
 		CASE_RETURN_STRING(eWNI_SME_GET_PEER_INFO_EXT_IND);
 		CASE_RETURN_STRING(eWNI_SME_RSO_CMD_STATUS_IND);
+		CASE_RETURN_STRING(eWNI_SME_TRIGGER_SAE);
+		CASE_RETURN_STRING(eWNI_SME_SEND_MGMT_FRAME_TX);
+		CASE_RETURN_STRING(eWNI_SME_SEND_SAE_MSG);
 		CASE_RETURN_STRING(eWNI_SME_MSG_TYPES_END);
 	default:
 		return (uint8_t *) "UNKNOWN";
@@ -623,8 +617,8 @@ uint8_t *mac_trace_get_wma_msg_string(uint16_t wma_msg)
 		CASE_RETURN_STRING(WMA_ADD_BCN_FILTER_CMDID);
 		CASE_RETURN_STRING(WMA_REMOVE_BCN_FILTER_CMDID);
 		CASE_RETURN_STRING(WMA_SET_ADAPT_DWELLTIME_CONF_PARAMS);
-		CASE_RETURN_STRING(WDA_BPF_GET_CAPABILITIES_REQ);
-		CASE_RETURN_STRING(WDA_BPF_SET_INSTRUCTIONS_REQ);
+		CASE_RETURN_STRING(WDA_APF_GET_CAPABILITIES_REQ);
+		CASE_RETURN_STRING(WDA_APF_SET_INSTRUCTIONS_REQ);
 		CASE_RETURN_STRING(WMA_SET_PDEV_IE_REQ);
 		CASE_RETURN_STRING(WMA_UPDATE_WEP_DEFAULT_KEY);
 		CASE_RETURN_STRING(WMA_SEND_FREQ_RANGE_CONTROL_IND);
@@ -726,6 +720,7 @@ uint8_t *mac_trace_get_wma_msg_string(uint16_t wma_msg)
 		CASE_RETURN_STRING(WMA_SET_PER_ROAM_CONFIG_CMD);
 		CASE_RETURN_STRING(WDA_ACTION_FRAME_RANDOM_MAC);
 		CASE_RETURN_STRING(WMA_SET_DBS_SCAN_SEL_CONF_PARAMS);
+		CASE_RETURN_STRING(WMA_GET_ROAM_SCAN_STATS);
 	default:
 		return (uint8_t *) "UNKNOWN";
 		break;
@@ -779,6 +774,7 @@ uint8_t *mac_trace_get_lim_msg_string(uint16_t lim_msg)
 		CASE_RETURN_STRING(SIR_LIM_DEAUTH_ACK_TIMEOUT);
 		CASE_RETURN_STRING(SIR_LIM_PERIODIC_JOIN_PROBE_REQ_TIMEOUT);
 		CASE_RETURN_STRING(SIR_LIM_AUTH_RETRY_TIMEOUT);
+		CASE_RETURN_STRING(SIR_LIM_AUTH_SAE_TIMEOUT);
 		CASE_RETURN_STRING(SIR_LIM_MSG_TYPES_END);
 		CASE_RETURN_STRING(LIM_MLM_SCAN_REQ);
 		CASE_RETURN_STRING(LIM_MLM_SCAN_CNF);

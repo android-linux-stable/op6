@@ -1,9 +1,6 @@
 /*
  * Copyright (c) 2012-2018 The Linux Foundation. All rights reserved.
  *
- * Previously licensed under the ISC license by Qualcomm Atheros, Inc.
- *
- *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
  * above copyright notice and this permission notice appear in all
@@ -17,12 +14,6 @@
  * PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER
  * TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR
  * PERFORMANCE OF THIS SOFTWARE.
- */
-
-/*
- * This file was originally distributed by Qualcomm Atheros, Inc.
- * under proprietary terms before Copyright ownership was assigned
- * to the Linux Foundation.
  */
 
 /**
@@ -504,46 +495,6 @@ static void hdd_get_transmit_sta_id(hdd_adapter_t *adapter,
 			*station_id = sta_ctx->conn_info.staId[0];
 	}
 }
-/**
- * hdd_is_tx_allowed() - check if Tx is allowed based on current peer state
- * @skb: pointer to OS packet (sk_buff)
- * @peer_id: Peer STA ID in peer table
- *
- * This function gets the peer state from DP and check if it is either
- * in OL_TXRX_PEER_STATE_CONN or OL_TXRX_PEER_STATE_AUTH. Only EAP packets
- * are allowed when peer_state is OL_TXRX_PEER_STATE_CONN. All packets
- * allowed when peer_state is OL_TXRX_PEER_STATE_AUTH.
- *
- * Return: true if Tx is allowed and false otherwise.
- **/
-static inline bool hdd_is_tx_allowed(struct sk_buff *skb, uint8_t peer_id)
-{
-	enum ol_txrx_peer_state peer_state;
-	void *pdev = cds_get_context(QDF_MODULE_ID_TXRX);
-	void *peer;
-
-	QDF_ASSERT(pdev);
-	peer = ol_txrx_peer_find_by_local_id(pdev, peer_id);
-
-	if (peer == NULL) {
-		DPTRACE(qdf_dp_trace(skb, QDF_DP_TRACE_DROP_PACKET_RECORD,
-					(uint8_t *)skb->data,
-					qdf_nbuf_len(skb), QDF_TX));
-		return false;
-	}
-	peer_state = ol_txrx_get_peer_state(peer);
-	if (OL_TXRX_PEER_STATE_AUTH == peer_state)
-		return true;
-	else if (OL_TXRX_PEER_STATE_CONN == peer_state &&
-			(ntohs(skb->protocol) == HDD_ETHERTYPE_802_1_X
-			|| IS_HDD_ETHERTYPE_WAI(skb)))
-		return true;
-	DPTRACE(qdf_dp_trace(skb, QDF_DP_TRACE_DROP_PACKET_RECORD,
-				(uint8_t *)skb->data,
-				qdf_nbuf_len(skb), QDF_TX));
-
-	return false;
-}
 
 /**
  * hdd_clear_tx_rx_connectivity_stats() - clear connectivity stats
@@ -848,6 +799,52 @@ void hdd_tx_rx_collect_connectivity_stats_info(struct sk_buff *skb,
 }
 
 /**
+ * hdd_is_tx_allowed() - check if Tx is allowed based on current peer state
+ * @skb: pointer to OS packet (sk_buff)
+ * @peer_id: Peer STA ID in peer table
+ *
+ * This function gets the peer state from DP and check if it is either
+ * in OL_TXRX_PEER_STATE_CONN or OL_TXRX_PEER_STATE_AUTH. Only EAP packets
+ * are allowed when peer_state is OL_TXRX_PEER_STATE_CONN. All packets
+ * allowed when peer_state is OL_TXRX_PEER_STATE_AUTH.
+ *
+ * Return: true if Tx is allowed and false otherwise.
+ **/
+static inline bool hdd_is_tx_allowed(struct sk_buff *skb, uint8_t peer_id)
+{
+	enum ol_txrx_peer_state peer_state;
+	void *pdev = cds_get_context(QDF_MODULE_ID_TXRX);
+	void *peer;
+
+	if (qdf_unlikely(NULL == pdev)) {
+		QDF_TRACE(QDF_MODULE_ID_HDD_DATA, QDF_TRACE_LEVEL_ERROR,
+			  "%s: pdev is NULL", __func__);
+		QDF_ASSERT(pdev);
+		return false;
+	}
+	peer = ol_txrx_peer_find_by_local_id(pdev, peer_id);
+
+	if (peer == NULL) {
+		DPTRACE(qdf_dp_trace(skb, QDF_DP_TRACE_DROP_PACKET_RECORD,
+					(uint8_t *)skb->data,
+					qdf_nbuf_len(skb), QDF_TX));
+		return false;
+	}
+	peer_state = ol_txrx_get_peer_state(peer);
+	if (OL_TXRX_PEER_STATE_AUTH == peer_state)
+		return true;
+	else if (OL_TXRX_PEER_STATE_CONN == peer_state &&
+			(ntohs(skb->protocol) == HDD_ETHERTYPE_802_1_X
+			|| IS_HDD_ETHERTYPE_WAI(skb)))
+		return true;
+	DPTRACE(qdf_dp_trace(skb, QDF_DP_TRACE_DROP_PACKET_RECORD,
+				(uint8_t *)skb->data,
+				qdf_nbuf_len(skb), QDF_TX));
+
+	return false;
+}
+
+/**
  * __hdd_hard_start_xmit() - Transmit a frame
  * @skb: pointer to OS packet (sk_buff)
  * @dev: pointer to network device
@@ -860,7 +857,8 @@ void hdd_tx_rx_collect_connectivity_stats_info(struct sk_buff *skb,
  *
  * Return: Always returns NETDEV_TX_OK
  */
-static int __hdd_hard_start_xmit(struct sk_buff *skb, struct net_device *dev)
+static netdev_tx_t __hdd_hard_start_xmit(struct sk_buff *skb,
+					 struct net_device *dev)
 {
 	QDF_STATUS status;
 	sme_ac_enum_type ac;
@@ -872,11 +870,8 @@ static int __hdd_hard_start_xmit(struct sk_buff *skb, struct net_device *dev)
 	hdd_context_t *hdd_ctx = WLAN_HDD_GET_CTX(pAdapter);
 #endif
 	hdd_station_ctx_t *pHddStaCtx = &pAdapter->sessionCtx.station;
+
 	uint8_t pkt_type = 0;
-	bool pkt_proto_logged = false;
-#ifdef QCA_PKT_PROTO_TRACE
-	uint8_t proto_type = 0;
-#endif /* QCA_PKT_PROTO_TRACE */
 	bool is_arp = false;
 
 #ifdef QCA_WIFI_FTM
@@ -1016,19 +1011,6 @@ static int __hdd_hard_start_xmit(struct sk_buff *skb, struct net_device *dev)
 		skb->queue_mapping = hdd_linux_up_to_ac_map[up];
 	}
 
-#ifdef QCA_PKT_PROTO_TRACE
-	if ((hdd_ctx->config->gEnableDebugLog & CDS_PKT_TRAC_TYPE_EAPOL) ||
-	    (hdd_ctx->config->gEnableDebugLog & CDS_PKT_TRAC_TYPE_DHCP)) {
-		proto_type = cds_pkt_get_proto_type(skb,
-						    hdd_ctx->config->gEnableDebugLog,
-						    0);
-		if (CDS_PKT_TRAC_TYPE_EAPOL & proto_type)
-			cds_pkt_trace_buf_update("ST:T:EPL");
-		else if (CDS_PKT_TRAC_TYPE_DHCP & proto_type)
-			cds_pkt_trace_buf_update("ST:T:DHC");
-	}
-#endif /* QCA_PKT_PROTO_TRACE */
-
 	pAdapter->stats.tx_bytes += skb->len;
 
 	wlan_hdd_tdls_update_tx_pkt_cnt(pAdapter, skb);
@@ -1039,8 +1021,6 @@ static int __hdd_hard_start_xmit(struct sk_buff *skb, struct net_device *dev)
 		++pAdapter->stats.tx_packets;
 
 	hdd_event_eapol_log(skb, QDF_TX);
-	pkt_proto_logged = qdf_dp_trace_log_pkt(pAdapter->sessionId,
-						skb, QDF_TX);
 	QDF_NBUF_CB_TX_PACKET_TRACK(skb) = QDF_NBUF_TX_PKT_DATA_TRACK;
 	QDF_NBUF_UPDATE_TX_PKT_COUNT(skb, QDF_NBUF_TX_PKT_HDD);
 
@@ -1049,18 +1029,6 @@ static int __hdd_hard_start_xmit(struct sk_buff *skb, struct net_device *dev)
 	DPTRACE(qdf_dp_trace(skb, QDF_DP_TRACE_HDD_TX_PACKET_PTR_RECORD,
 			qdf_nbuf_data_addr(skb), sizeof(qdf_nbuf_data(skb)),
 			QDF_TX));
-	if (!pkt_proto_logged) {
-		DPTRACE(qdf_dp_trace(skb, QDF_DP_TRACE_HDD_TX_PACKET_RECORD,
-				(uint8_t *)skb->data,
-				qdf_nbuf_len(skb), QDF_TX));
-		if (qdf_nbuf_len(skb) > QDF_DP_TRACE_RECORD_SIZE) {
-			DPTRACE(qdf_dp_trace(skb,
-				QDF_DP_TRACE_HDD_TX_PACKET_RECORD,
-				(uint8_t *)&skb->data[QDF_DP_TRACE_RECORD_SIZE],
-				(qdf_nbuf_len(skb)-QDF_DP_TRACE_RECORD_SIZE),
-				QDF_TX));
-		}
-	}
 
 	/* Check if station is connected */
 	if (OL_TXRX_PEER_STATE_CONN ==
@@ -1072,7 +1040,6 @@ static int __hdd_hard_start_xmit(struct sk_buff *skb, struct net_device *dev)
 		++pAdapter->hdd_stats.hddTxRxStats.txXmitDroppedAC[ac];
 		goto drop_pkt_and_release_skb;
 	}
-
 	if (!hdd_is_tx_allowed(skb, STAId)) {
 		QDF_TRACE(QDF_MODULE_ID_HDD_DATA,
 			  QDF_TRACE_LEVEL_INFO_HIGH,
@@ -1104,7 +1071,7 @@ static int __hdd_hard_start_xmit(struct sk_buff *skb, struct net_device *dev)
 	}
 
 	if (pAdapter->tx_fn(ol_txrx_get_vdev_by_sta_id(STAId),
-		 (qdf_nbuf_t) skb) != NULL) {
+		 (qdf_nbuf_t)skb, 0) != NULL) {
 		QDF_TRACE(QDF_MODULE_ID_HDD_DATA, QDF_TRACE_LEVEL_INFO_HIGH,
 			  "%s: Failed to send packet to txrx for staid: %d",
 			  __func__, STAId);
@@ -1121,16 +1088,15 @@ drop_pkt_and_release_skb:
 drop_pkt:
 
 	if (skb) {
-		DPTRACE(qdf_dp_trace(skb, QDF_DP_TRACE_DROP_PACKET_RECORD,
-			(uint8_t *)skb->data, qdf_nbuf_len(skb), QDF_TX));
-		if (qdf_nbuf_len(skb) > QDF_DP_TRACE_RECORD_SIZE)
-			DPTRACE(qdf_dp_trace(skb,
-				 QDF_DP_TRACE_DROP_PACKET_RECORD,
-				(uint8_t *)&skb->data[QDF_DP_TRACE_RECORD_SIZE],
-				(qdf_nbuf_len(skb)-QDF_DP_TRACE_RECORD_SIZE),
-				 QDF_TX));
+		/* track connectivity stats */
+		if (pAdapter->pkt_type_bitmap)
+			hdd_tx_rx_collect_connectivity_stats_info(skb, pAdapter,
+						PKT_TYPE_TX_DROPPED, &pkt_type);
 
+		qdf_dp_trace_data_pkt(skb, QDF_DP_TRACE_DROP_PACKET_RECORD, 0,
+				      QDF_TX);
 		kfree_skb(skb);
+		skb = NULL;
 	}
 
 drop_pkt_accounting:
@@ -1142,11 +1108,6 @@ drop_pkt_accounting:
 		QDF_TRACE(QDF_MODULE_ID_HDD_DATA, QDF_TRACE_LEVEL_INFO_HIGH,
 				  "%s : ARP packet dropped", __func__);
 	}
-
-	/* track connectivity stats */
-	if (pAdapter->pkt_type_bitmap)
-		hdd_tx_rx_collect_connectivity_stats_info(skb, pAdapter,
-						PKT_TYPE_TX_DROPPED, &pkt_type);
 
 	return NETDEV_TX_OK;
 }
@@ -1161,9 +1122,9 @@ drop_pkt_accounting:
  *
  * Return: Always returns NETDEV_TX_OK
  */
-int hdd_hard_start_xmit(struct sk_buff *skb, struct net_device *dev)
+netdev_tx_t hdd_hard_start_xmit(struct sk_buff *skb, struct net_device *dev)
 {
-	int ret;
+	netdev_tx_t ret;
 
 	cds_ssr_protect(__func__);
 	ret = __hdd_hard_start_xmit(skb, dev);
@@ -1492,10 +1453,10 @@ static bool hdd_is_duplicate_ip_arp(struct sk_buff *skb)
 	if (NULL == skb)
 		return false;
 
-	arp_ip = hdd_get_arp_src_ip(skb);
-
 	if (!skb->dev)
 		return false;
+
+	arp_ip = hdd_get_arp_src_ip(skb);
 
 	in_dev = __in_dev_get_rtnl(skb->dev);
 	if (in_dev) {
@@ -1721,7 +1682,7 @@ static inline void hdd_register_rx_ol(void)
 
 	hdd_ctx->tcp_delack_on = 0;
 
-	if (hdd_ctx->ol_enable == CFG_LRO_ENABLED) {
+	if (!hdd_is_lro_enabled(hdd_ctx)) {
 		hdd_ctx->receive_offload_cb = hdd_lro_rx;
 		/* Register the flush callback */
 		hdd_lro_create();
@@ -1770,6 +1731,10 @@ void hdd_gro_destroy(void)
 }
 #else /* HELIUMPLUS */
 static inline void hdd_register_rx_ol(void) { }
+
+void hdd_gro_destroy(void)
+{
+}
 #endif
 
 /**
@@ -1917,7 +1882,6 @@ QDF_STATUS hdd_rx_packet_cbk(void *context, qdf_nbuf_t rxBuf)
 	bool is_arp = false;
 	bool track_arp = false;
 	uint8_t pkt_type = 0;
-	bool proto_pkt_logged = false;
 
 	/* Sanity check on inputs */
 	if (unlikely((NULL == context) || (NULL == rxBuf))) {
@@ -1981,22 +1945,14 @@ QDF_STATUS hdd_rx_packet_cbk(void *context, qdf_nbuf_t rxBuf)
 	}
 
 	hdd_event_eapol_log(skb, QDF_RX);
-	proto_pkt_logged = qdf_dp_trace_log_pkt(pAdapter->sessionId,
-						skb, QDF_RX);
+	qdf_dp_trace_log_pkt(pAdapter->sessionId, skb, QDF_RX);
 	DPTRACE(qdf_dp_trace(skb,
 		QDF_DP_TRACE_RX_HDD_PACKET_PTR_RECORD,
 		qdf_nbuf_data_addr(skb),
 		sizeof(qdf_nbuf_data(skb)), QDF_RX));
-	if (!proto_pkt_logged) {
-		DPTRACE(qdf_dp_trace(skb, QDF_DP_TRACE_HDD_RX_PACKET_RECORD,
-			(uint8_t *)skb->data, qdf_nbuf_len(skb), QDF_RX));
-		if (qdf_nbuf_len(skb) > QDF_DP_TRACE_RECORD_SIZE)
-			DPTRACE(qdf_dp_trace(skb,
-				QDF_DP_TRACE_HDD_RX_PACKET_RECORD,
-				(uint8_t *)&skb->data[QDF_DP_TRACE_RECORD_SIZE],
-				(qdf_nbuf_len(skb)-QDF_DP_TRACE_RECORD_SIZE),
-				QDF_RX));
-	}
+
+	DPTRACE(qdf_dp_trace_data_pkt(skb, QDF_DP_TRACE_RX_PACKET_RECORD,
+				      0, QDF_RX));
 
 	wlan_hdd_tdls_update_rx_pkt_cnt(pAdapter, skb);
 

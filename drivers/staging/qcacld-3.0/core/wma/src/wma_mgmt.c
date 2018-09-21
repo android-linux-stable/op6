@@ -1,9 +1,6 @@
 /*
  * Copyright (c) 2013-2018 The Linux Foundation. All rights reserved.
  *
- * Previously licensed under the ISC license by Qualcomm Atheros, Inc.
- *
- *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
  * above copyright notice and this permission notice appear in all
@@ -17,12 +14,6 @@
  * PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER
  * TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR
  * PERFORMANCE OF THIS SOFTWARE.
- */
-
-/*
- * This file was originally distributed by Qualcomm Atheros, Inc.
- * under proprietary terms before Copyright ownership was assigned
- * to the Linux Foundation.
  */
 
 /**
@@ -72,6 +63,7 @@
 #include <cdp_txrx_cfg.h>
 #include <cdp_txrx_cmn.h>
 #include <cdp_txrx_misc.h>
+#include <qdf_crypto.h>
 
 /**
  * wma_send_bcn_buf_ll() - prepare and send beacon buffer to fw for LL
@@ -592,10 +584,11 @@ static inline void wma_get_link_probe_timeout(struct sAniSirGlobal *mac,
 /**
  * wma_verify_rate_code() - verify if rate code is valid.
  * @rate_code:     rate code
+ * @band:     band information
  *
  * Return: verify result
  */
-static bool wma_verify_rate_code(u_int32_t rate_code)
+static bool wma_verify_rate_code(u_int32_t rate_code, enum cds_band_type band)
 {
 	uint8_t preamble, nss, rate;
 	bool valid = true;
@@ -606,7 +599,7 @@ static bool wma_verify_rate_code(u_int32_t rate_code)
 
 	switch (preamble) {
 	case WMI_RATE_PREAMBLE_CCK:
-		if (nss != 0 || rate > 3)
+		if (nss != 0 || rate > 3 || band == CDS_BAND_5GHZ)
 			valid = false;
 		break;
 	case WMI_RATE_PREAMBLE_OFDM:
@@ -614,11 +607,11 @@ static bool wma_verify_rate_code(u_int32_t rate_code)
 			valid = false;
 		break;
 	case WMI_RATE_PREAMBLE_HT:
-		if (nss > 1 || rate > 7)
+		if (nss != 0 || rate > 7)
 			valid = false;
 		break;
 	case WMI_RATE_PREAMBLE_VHT:
-		if (nss > 1 || rate > 9)
+		if (nss != 0 || rate > 9)
 			valid = false;
 		break;
 	default:
@@ -644,6 +637,7 @@ void wma_set_vdev_mgmt_rate(tp_wma_handle wma, uint8_t vdev_id)
 	uint32_t cfg_val;
 	int ret;
 	uint32_t per_band_mgmt_tx_rate = 0;
+	enum cds_band_type band = 0;
 	struct sAniSirGlobal *mac = cds_get_context(QDF_MODULE_ID_PE);
 
 	if (NULL == mac) {
@@ -653,8 +647,9 @@ void wma_set_vdev_mgmt_rate(tp_wma_handle wma, uint8_t vdev_id)
 
 	if (wlan_cfg_get_int(mac, WNI_CFG_RATE_FOR_TX_MGMT,
 			     &cfg_val) == eSIR_SUCCESS) {
+		band = CDS_BAND_ALL;
 		if ((cfg_val == WNI_CFG_RATE_FOR_TX_MGMT_STADEF) ||
-		    !wma_verify_rate_code(cfg_val)) {
+		    !wma_verify_rate_code(cfg_val, band)) {
 			WMA_LOGD("default WNI_CFG_RATE_FOR_TX_MGMT, ignore");
 		} else {
 			ret = wma_vdev_set_param(
@@ -673,8 +668,10 @@ void wma_set_vdev_mgmt_rate(tp_wma_handle wma, uint8_t vdev_id)
 
 	if (wlan_cfg_get_int(mac, WNI_CFG_RATE_FOR_TX_MGMT_2G,
 			     &cfg_val) == eSIR_SUCCESS) {
+		band = CDS_BAND_2GHZ;
 		if ((cfg_val == WNI_CFG_RATE_FOR_TX_MGMT_2G_STADEF) ||
-		    !wma_verify_rate_code(cfg_val)) {
+		    !wma_verify_rate_code(cfg_val, band)) {
+			WMA_LOGD("use default 2G MGMT rate.");
 			per_band_mgmt_tx_rate &=
 			    ~(1 << TX_MGMT_RATE_2G_ENABLE_OFFSET);
 		} else {
@@ -689,8 +686,10 @@ void wma_set_vdev_mgmt_rate(tp_wma_handle wma, uint8_t vdev_id)
 
 	if (wlan_cfg_get_int(mac, WNI_CFG_RATE_FOR_TX_MGMT_5G,
 			     &cfg_val) == eSIR_SUCCESS) {
+		band = CDS_BAND_5GHZ;
 		if ((cfg_val == WNI_CFG_RATE_FOR_TX_MGMT_5G_STADEF) ||
-		    !wma_verify_rate_code(cfg_val)) {
+		    !wma_verify_rate_code(cfg_val, band)) {
+			WMA_LOGD("use default 5G MGMT rate.");
 			per_band_mgmt_tx_rate &=
 			    ~(1 << TX_MGMT_RATE_5G_ENABLE_OFFSET);
 		} else {
@@ -1566,9 +1565,7 @@ static QDF_STATUS wma_setup_install_key_cmd(tp_wma_handle wma_handle,
 {
 	struct set_key_params params;
 	QDF_STATUS status = QDF_STATUS_SUCCESS;
-#ifdef WLAN_FEATURE_11W
 	struct wma_txrx_node *iface = NULL;
-#endif /* WLAN_FEATURE_11W */
 	if ((key_params->key_type == eSIR_ED_NONE &&
 	     key_params->key_len) || (key_params->key_type != eSIR_ED_NONE &&
 				      !key_params->key_len)) {
@@ -1670,6 +1667,10 @@ static QDF_STATUS wma_setup_install_key_cmd(tp_wma_handle wma_handle,
 	case eSIR_ED_AES_128_CMAC:
 		params.key_cipher = WMI_CIPHER_AES_CMAC;
 		break;
+	case eSIR_ED_AES_GMAC_128:
+	case eSIR_ED_AES_GMAC_256:
+		params.key_cipher = WMI_CIPHER_AES_GMAC;
+		break;
 #endif /* WLAN_FEATURE_11W */
 	/* Firmware uses length to detect GCMP 128/256*/
 	case eSIR_ED_GCMP:
@@ -1711,10 +1712,14 @@ static QDF_STATUS wma_setup_install_key_cmd(tp_wma_handle wma_handle,
 	params.key_len = key_params->key_len;
 
 #ifdef WLAN_FEATURE_11W
-	if (key_params->key_type == eSIR_ED_AES_128_CMAC) {
-		iface = &wma_handle->interfaces[key_params->vdev_id];
+	iface = &wma_handle->interfaces[key_params->vdev_id];
+
+	if ((key_params->key_type == eSIR_ED_AES_128_CMAC) ||
+	   (key_params->key_type == eSIR_ED_AES_GMAC_128) ||
+	   (key_params->key_type == eSIR_ED_AES_GMAC_256)) {
 		if (iface) {
 			iface->key.key_length = key_params->key_len;
+			iface->key.key_cipher = params.key_cipher;
 			qdf_mem_copy(iface->key.key,
 				     (const void *)key_params->key_data,
 				     iface->key.key_length);
@@ -1725,6 +1730,9 @@ static QDF_STATUS wma_setup_install_key_cmd(tp_wma_handle wma_handle,
 					     CMAC_IPN_LEN);
 		}
 	}
+
+	if (key_params->unicast && iface)
+		iface->ucast_key_cipher = params.key_cipher;
 #endif /* WLAN_FEATURE_11W */
 
 	WMA_LOGD("Key setup : vdev_id %d key_idx %d key_type %d key_len %d",
@@ -1745,7 +1753,8 @@ static QDF_STATUS wma_setup_install_key_cmd(tp_wma_handle wma_handle,
 		wma_release_wakelock(&iface->vdev_set_key_wakelock);
 	}
 	/* install key was requested */
-	iface->is_waiting_for_key = false;
+	if (iface)
+		iface->is_waiting_for_key = false;
 
 	return status;
 }
@@ -2284,7 +2293,7 @@ static int wmi_unified_probe_rsp_tmpl_send(tp_wma_handle wma,
 
 	WMA_LOGD(FL("Send probe response template for vdev %d"), vdev_id);
 
-	frm = probe_rsp_info->pProbeRespTemplate;
+	frm = probe_rsp_info->probeRespTemplate;
 
 	/*
 	 * Make the TSF offset negative so probe response in the same
@@ -2296,7 +2305,7 @@ static int wmi_unified_probe_rsp_tmpl_send(tp_wma_handle wma,
 	wh = (struct ieee80211_frame *)frm;
 	A_MEMCPY(&wh[1], &adjusted_tsf_le, sizeof(adjusted_tsf_le));
 
-	params.pProbeRespTemplate = probe_rsp_info->pProbeRespTemplate;
+	params.pProbeRespTemplate = probe_rsp_info->probeRespTemplate;
 	params.probeRespTemplateLen = probe_rsp_info->probeRespTemplateLen;
 	qdf_mem_copy(params.bssId, probe_rsp_info->bssId,
 		     IEEE80211_ADDR_LEN);
@@ -2369,6 +2378,14 @@ static QDF_STATUS wma_unified_bcn_tmpl_send(tp_wma_handle wma,
 	params.tmpl_len = tmpl_len;
 	params.frm = frm;
 	params.tmpl_len_aligned = tmpl_len_aligned;
+	if (bcn_info->csa_count_offset &&
+	    (bcn_info->csa_count_offset > bytes_to_strip))
+		params.csa_count_offset =
+			bcn_info->csa_count_offset - bytes_to_strip;
+	if (bcn_info->ecsa_count_offset &&
+	    (bcn_info->ecsa_count_offset > bytes_to_strip))
+		params.ecsa_count_offset =
+			bcn_info->ecsa_count_offset - bytes_to_strip;
 
 	ret = wmi_unified_beacon_send_cmd(wma->wmi_handle,
 				 &params);
@@ -2513,7 +2530,8 @@ int wma_tbttoffset_update_event_handler(void *handle, uint8_t *event,
 
 		qdf_spin_lock_bh(&bcn->lock);
 		qdf_mem_zero(&bcn_info, sizeof(bcn_info));
-		bcn_info.beacon = qdf_nbuf_data(bcn->buf);
+		qdf_mem_copy(bcn_info.beacon, qdf_nbuf_data(bcn->buf),
+			     bcn->len);
 		bcn_info.p2pIeOffset = bcn->p2p_ie_offset;
 		bcn_info.beaconLength = bcn->len;
 		bcn_info.timIeOffset = bcn->tim_ie_offset;
@@ -2568,7 +2586,7 @@ void wma_send_probe_rsp_tmpl(tp_wma_handle wma,
 	}
 
 	probe_rsp = (struct sAniProbeRspStruct *)
-				 (probe_rsp_info->pProbeRespTemplate);
+				 (probe_rsp_info->probeRespTemplate);
 	if (!probe_rsp) {
 		WMA_LOGE(FL("probe_rsp is NULL"));
 		return;
@@ -2921,6 +2939,29 @@ void wma_process_update_opmode(tp_wma_handle wma_handle,
 }
 
 /**
+ * wma_update_txrx_chainmask() - process txrx chainmask
+ * @num_rf_chains: rf chains
+ * @cmd_value: rx nss value
+ *
+ * Return: none
+ */
+static void wma_update_txrx_chainmask(int num_rf_chains, int *cmd_value)
+{
+	int tmp;
+
+	tmp = WMA_MAX_RF_CHAINS(num_rf_chains);
+	if (*cmd_value > tmp) {
+		WMA_LOGE("%s: exceed the maximum! Request %d, Update %d",
+			 __func__, *cmd_value, tmp);
+		*cmd_value = tmp;
+	} else if (*cmd_value < WMA_MIN_RF_CHAINS) {
+		WMA_LOGE("%s: less than the minimum! Request %d Update %d",
+			 __func__, *cmd_value, WMA_MIN_RF_CHAINS);
+		*cmd_value = WMA_MIN_RF_CHAINS;
+	}
+}
+
+/**
  * wma_process_update_rx_nss() - process update RX NSS cmd from UMAC
  * @wma_handle: wma handle
  * @update_rx_nss: rx nss value
@@ -2933,6 +2974,8 @@ void wma_process_update_rx_nss(tp_wma_handle wma_handle,
 	struct wma_txrx_node *intr =
 		&wma_handle->interfaces[update_rx_nss->smesessionId];
 	int rx_nss = update_rx_nss->rxNss;
+
+	wma_update_txrx_chainmask(wma_handle->num_rf_chains, &rx_nss);
 
 	if (rx_nss > WMA_MAX_NSS)
 		rx_nss = WMA_MAX_NSS;
@@ -3240,32 +3283,84 @@ int wma_process_bip(tp_wma_handle wma_handle,
 	uint8_t *efrm;
 
 	efrm = qdf_nbuf_data(wbuf) + qdf_nbuf_len(wbuf);
-	key_id = (uint16_t)*(efrm - cds_get_mmie_size() + 2);
+	/* Check if frame is invalid length */
+	if (efrm - (uint8_t *)wh < sizeof(*wh) + sizeof(struct ieee80211_mmie)) {
+		WMA_LOGE(FL("Invalid frame length"));
+		return -EINVAL;
+	}
+
+	if (iface->key.key_cipher == WMI_CIPHER_AES_CMAC) {
+		key_id = (uint16_t)*(efrm - cds_get_mmie_size() + 2);
+	} else if (iface->key.key_cipher == WMI_CIPHER_AES_GMAC) {
+		key_id = (uint16_t)*(efrm - cds_get_gmac_mmie_size() + 2);
+	} else {
+		WMA_LOGE(FL("Invalid key cipher %d"), iface->key.key_cipher);
+		return -EINVAL;
+	}
 
 	if (!((key_id == WMA_IGTK_KEY_INDEX_4)
 	     || (key_id == WMA_IGTK_KEY_INDEX_5))) {
 		WMA_LOGE(FL("Invalid KeyID(%d) dropping the frame"), key_id);
 		return -EINVAL;
 	}
-	if (WMI_SERVICE_IS_ENABLED(wma_handle->wmi_service_bitmap,
-				WMI_SERVICE_STA_PMF_OFFLOAD)) {
-		/*
-		 * if 11w offload is enabled then mmie validation is performed
-		 * in firmware, host just need to trim the mmie.
-		 */
-		qdf_nbuf_trim_tail(wbuf, cds_get_mmie_size());
-	} else {
-		if (cds_is_mmie_valid(iface->key.key,
-			iface->key.key_id[key_id - WMA_IGTK_KEY_INDEX_4].ipn,
-			(uint8_t *) wh, efrm)) {
-			WMA_LOGE(FL("Protected BC/MC frame MMIE validation successful"));
-			/* Remove MMIE */
+
+	WMA_LOGD(FL("key_cipher %d key_id %d"), iface->key.key_cipher, key_id);
+
+	switch (iface->key.key_cipher) {
+	case WMI_CIPHER_AES_CMAC:
+		if (WMI_SERVICE_IS_ENABLED(wma_handle->wmi_service_bitmap,
+					WMI_SERVICE_STA_PMF_OFFLOAD)) {
+			/*
+			 * if 11w offload is enabled then mmie validation is
+			 * performed in firmware, host just need to trim the
+			 * mmie.
+			 */
 			qdf_nbuf_trim_tail(wbuf, cds_get_mmie_size());
 		} else {
-			WMA_LOGE(FL("BC/MC MIC error or MMIE not present, dropping the frame"));
-			return -EINVAL;
+			if (cds_is_mmie_valid(iface->key.key,
+			   iface->key.key_id[key_id - WMA_IGTK_KEY_INDEX_4].ipn,
+			   (uint8_t *) wh, efrm)) {
+				WMA_LOGD(FL("Protected BC/MC frame MMIE validation successful"));
+				/* Remove MMIE */
+				qdf_nbuf_trim_tail(wbuf, cds_get_mmie_size());
+			} else {
+				WMA_LOGD(FL("BC/MC MIC error or MMIE not present, dropping the frame"));
+				return -EINVAL;
+			}
 		}
+		break;
+
+	case WMI_CIPHER_AES_GMAC:
+		if (WMI_SERVICE_EXT_IS_ENABLED(wma_handle->wmi_service_bitmap,
+		    wma_handle->wmi_service_ext_bitmap,
+		    WMI_SERVICE_GMAC_OFFLOAD_SUPPORT)) {
+			/*
+			 * if gmac offload is enabled then mmie validation is
+			 * performed in firmware, host just need to trim the
+			 * mmie.
+			 */
+			WMA_LOGD(FL("Trim GMAC MMIE"));
+			qdf_nbuf_trim_tail(wbuf, cds_get_gmac_mmie_size());
+		} else {
+			if (cds_is_gmac_mmie_valid(iface->key.key,
+			   iface->key.key_id[key_id - WMA_IGTK_KEY_INDEX_4].ipn,
+			   (uint8_t *) wh, efrm, iface->key.key_length)) {
+				WMA_LOGD(FL("Protected BC/MC frame GMAC MMIE validation successful"));
+				/* Remove MMIE */
+				qdf_nbuf_trim_tail(wbuf,
+						   cds_get_gmac_mmie_size());
+			} else {
+				WMA_LOGD(FL("BC/MC GMAC MIC error or MMIE not present, dropping the frame"));
+				return -EINVAL;
+			}
+		}
+		break;
+
+	default:
+		WMA_LOGE(FL("Unsupported key cipher %d"),
+			iface->key.key_cipher);
 	}
+
 	return 0;
 }
 
@@ -3288,6 +3383,7 @@ int wma_process_rmf_frame(tp_wma_handle wma_handle,
 {
 	uint8_t *orig_hdr;
 	uint8_t *ccmp;
+	uint8_t mic_len, hdr_len;
 
 	if ((wh)->i_fc[1] & IEEE80211_FC1_WEP) {
 		if (IEEE80211_IS_BROADCAST(wh->i_addr1) ||
@@ -3314,15 +3410,22 @@ int wma_process_rmf_frame(tp_wma_handle wma_handle,
 			return -EINVAL;
 		}
 
+		if (iface->ucast_key_cipher == WMI_CIPHER_AES_GCM) {
+			hdr_len = WLAN_IEEE80211_GCMP_HEADERLEN;
+			mic_len = WLAN_IEEE80211_GCMP_MICLEN;
+		} else {
+			hdr_len = IEEE80211_CCMP_HEADERLEN;
+			mic_len = IEEE80211_CCMP_MICLEN;
+		}
 		/* Strip privacy headers (and trailer)
 		 * for a received frame
 		 */
 		qdf_mem_move(orig_hdr +
-			IEEE80211_CCMP_HEADERLEN, wh,
+			hdr_len, wh,
 			sizeof(*wh));
 		qdf_nbuf_pull_head(wbuf,
-			IEEE80211_CCMP_HEADERLEN);
-		qdf_nbuf_trim_tail(wbuf, IEEE80211_CCMP_MICLEN);
+			hdr_len);
+		qdf_nbuf_trim_tail(wbuf, mic_len);
 		/*
 		 * CCMP header has been pulled off
 		 * reinitialize the start pointer of mac header
@@ -3444,37 +3547,33 @@ static bool wma_is_pkt_drop_candidate(tp_wma_handle wma_handle,
 	}
 
 	switch (subtype) {
-	case SIR_MAC_MGMT_ASSOC_REQ:
-		if (peer->last_assoc_rcvd) {
-			if (qdf_get_system_timestamp() - peer->last_assoc_rcvd <
-					WMA_MGMT_FRAME_DETECT_DOS_TIMER) {
-				WMA_LOGD(FL("Dropping Assoc Req received"));
-				should_drop = true;
-			}
+	case IEEE80211_FC0_SUBTYPE_ASSOC_REQ:
+		if (peer->last_assoc_rcvd &&
+		    qdf_system_time_before(qdf_get_system_timestamp(),
+		    peer->last_assoc_rcvd + WMA_MGMT_FRAME_DETECT_DOS_TIMER)) {
+			WMA_LOGD(FL("Dropping Assoc Req as it is received after %d ms of last frame. Allow it only after %d ms"),
+				 (int) (qdf_get_system_timestamp() -
+				  peer->last_assoc_rcvd),
+				  WMA_MGMT_FRAME_DETECT_DOS_TIMER);
+			should_drop = true;
+			break;
 		}
 		peer->last_assoc_rcvd = qdf_get_system_timestamp();
 		break;
-	case SIR_MAC_MGMT_DISASSOC:
-		if (peer->last_disassoc_rcvd) {
-			if (qdf_get_system_timestamp() -
-					peer->last_disassoc_rcvd <
-					WMA_MGMT_FRAME_DETECT_DOS_TIMER) {
-				WMA_LOGI(FL("Dropping DisAssoc received"));
-				should_drop = true;
-			}
+	case IEEE80211_FC0_SUBTYPE_DISASSOC:
+	case IEEE80211_FC0_SUBTYPE_DEAUTH:
+		if (peer->last_disassoc_deauth_rcvd &&
+		    qdf_system_time_before(qdf_get_system_timestamp(),
+		    peer->last_disassoc_deauth_rcvd +
+		    WMA_MGMT_FRAME_DETECT_DOS_TIMER)) {
+			WMA_LOGD(FL("Dropping subtype %x frame as it is received after %d ms of last frame. Allow it only after %d ms"),
+				 subtype, (int) (qdf_get_system_timestamp() -
+				 peer->last_disassoc_deauth_rcvd),
+				 WMA_MGMT_FRAME_DETECT_DOS_TIMER);
+			should_drop = true;
+			break;
 		}
-		peer->last_disassoc_rcvd = qdf_get_system_timestamp();
-		break;
-	case SIR_MAC_MGMT_DEAUTH:
-		if (peer->last_deauth_rcvd) {
-			if (qdf_get_system_timestamp() -
-					peer->last_deauth_rcvd <
-					WMA_MGMT_FRAME_DETECT_DOS_TIMER) {
-				WMA_LOGI(FL("Dropping Deauth received"));
-				should_drop = true;
-			}
-		}
-		peer->last_deauth_rcvd = qdf_get_system_timestamp();
+		peer->last_disassoc_deauth_rcvd = qdf_get_system_timestamp();
 		break;
 	default:
 		break;
@@ -3610,6 +3709,10 @@ static int wma_mgmt_rx_process(void *handle, uint8_t *data,
 
 	rx_pkt->pkt_meta.roamCandidateInd = 0;
 
+	/* Copy per chain rssi to rx_pkt */
+	qdf_mem_copy(rx_pkt->pkt_meta.rssi_per_chain, hdr->rssi_ctl,
+				sizeof(rx_pkt->pkt_meta.rssi_per_chain));
+
 	/*
 	 * If the mpdu_data_len is greater than Max (2k), drop the frame
 	 */
@@ -3685,21 +3788,28 @@ static int wma_mgmt_rx_process(void *handle, uint8_t *data,
 #else
 	qdf_mem_copy(wh, param_tlvs->bufp, hdr->buf_len);
 #endif
+	/* If it is a beacon/probe response, save it for future use */
+	mgt_type = (wh)->i_fc[0] & IEEE80211_FC0_TYPE_MASK;
+	mgt_subtype = (wh)->i_fc[0] & IEEE80211_FC0_SUBTYPE_MASK;
 
-	WMA_LOGD(FL("BSSID: "MAC_ADDRESS_STR" snr = %d, rssi = %d, rssi_raw = %d tsf_delta: %u"),
+	WMA_LOGD(FL("BSSID: "MAC_ADDRESS_STR" snr = %d, Type = %x, Subtype = %x, seq_num = %x, rssi = %d, rssi_raw = %d rssi for chain0 is :- %d, chain1 is %d, tsf_delta: %u"),
 			MAC_ADDR_ARRAY(wh->i_addr3),
-			hdr->snr, rx_pkt->pkt_meta.rssi,
+			hdr->snr, mgt_type, mgt_subtype,
+			(((*(uint16_t *)wh->i_seq) &
+				IEEE80211_SEQ_SEQ_MASK) >>
+				IEEE80211_SEQ_SEQ_SHIFT),
+			rx_pkt->pkt_meta.rssi,
 			rx_pkt->pkt_meta.rssi_raw,
+			(rx_pkt->pkt_meta.rssi_per_chain[0] +
+					WMA_NOISE_FLOOR_DBM_DEFAULT),
+			(rx_pkt->pkt_meta.rssi_per_chain[1] +
+					WMA_NOISE_FLOOR_DBM_DEFAULT),
 			hdr->tsf_delta);
 	if (!wma_handle->mgmt_rx) {
 		WMA_LOGE("Not registered for Mgmt rx, dropping the frame");
 		cds_pkt_return_packet(rx_pkt);
 		return -EINVAL;
 	}
-
-	/* If it is a beacon/probe response, save it for future use */
-	mgt_type = (wh)->i_fc[0] & IEEE80211_FC0_TYPE_MASK;
-	mgt_subtype = (wh)->i_fc[0] & IEEE80211_FC0_SUBTYPE_MASK;
 
 	if (wma_read_d0wow_flag(wma_handle)) {
 		WMA_LOGE("%s: Frame subtype is 0x%x", __func__, mgt_subtype);

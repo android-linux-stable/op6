@@ -1,8 +1,5 @@
 /*
- * Copyright (c) 2011-2017 The Linux Foundation. All rights reserved.
- *
- * Previously licensed under the ISC license by Qualcomm Atheros, Inc.
- *
+ * Copyright (c) 2011-2018 The Linux Foundation. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -17,12 +14,6 @@
  * PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER
  * TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR
  * PERFORMANCE OF THIS SOFTWARE.
- */
-
-/*
- * This file was originally distributed by Qualcomm Atheros, Inc.
- * under proprietary terms before Copyright ownership was assigned
- * to the Linux Foundation.
  */
 
 /*
@@ -223,6 +214,15 @@ tSirRetStatus sch_send_beacon_req(tpAniSirGlobal pMac, uint8_t *beaconPayload,
 		beaconParams->timIeOffset = 0;
 	} else {
 		beaconParams->timIeOffset = psessionEntry->schBeaconOffsetBegin;
+		if (psessionEntry->dfsIncludeChanSwIe) {
+			beaconParams->csa_count_offset =
+				pMac->sch.schObject.csa_count_offset;
+			beaconParams->ecsa_count_offset =
+				pMac->sch.schObject.ecsa_count_offset;
+			pe_debug("csa_count_offset %d ecsa_count_offset %d",
+				 beaconParams->csa_count_offset,
+				 beaconParams->ecsa_count_offset);
+		}
 	}
 
 	/* p2pIeOffset should be atleast greater than timIeOffset */
@@ -240,7 +240,15 @@ tSirRetStatus sch_send_beacon_req(tpAniSirGlobal pMac, uint8_t *beaconPayload,
 	pe_err("TimIeOffset:[%d]", beaconParams->TimIeOffset);
 #endif
 
-	beaconParams->beacon = beaconPayload;
+	if (size >= SIR_MAX_BEACON_SIZE) {
+		  pe_err("beacon size (%d) exceed host limit %d",
+			 size, SIR_MAX_BEACON_SIZE);
+		  QDF_ASSERT(0);
+		  qdf_mem_free(beaconParams);
+		  return eSIR_FAILURE;
+	}
+	qdf_mem_copy(beaconParams->beacon, beaconPayload, size);
+
 	beaconParams->beaconLength = (uint32_t) size;
 	msgQ.bodyptr = beaconParams;
 	msgQ.bodyval = 0;
@@ -418,7 +426,7 @@ uint32_t lim_send_probe_rsp_template_to_hal(tpAniSirGlobal pMac,
 	nBytes += nPayload + sizeof(tSirMacMgmtHdr);
 
 	/* Make sure we are not exceeding allocated len */
-	if (nBytes > SCH_MAX_PROBE_RESP_SIZE) {
+	if (nBytes > SIR_MAX_PROBE_RESP_SIZE) {
 		pe_err("nBytes %d greater than max size", nBytes);
 		qdf_mem_free(addIE);
 		return eSIR_FAILURE;
@@ -466,7 +474,8 @@ uint32_t lim_send_probe_rsp_template_to_hal(tpAniSirGlobal pMac,
 		pe_err("malloc failed for bytes %d", nBytes);
 	} else {
 		sir_copy_mac_addr(pprobeRespParams->bssId, psessionEntry->bssId);
-		pprobeRespParams->pProbeRespTemplate = pFrame2Hal;
+		qdf_mem_copy(pprobeRespParams->probeRespTemplate,
+			     pFrame2Hal, nBytes);
 		pprobeRespParams->probeRespTemplateLen = nBytes;
 		qdf_mem_copy(pprobeRespParams->ucProxyProbeReqValidIEBmap,
 			     IeBitmap, (sizeof(uint32_t) * 8));

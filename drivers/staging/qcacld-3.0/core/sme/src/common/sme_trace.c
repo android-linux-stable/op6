@@ -1,8 +1,5 @@
 /*
- * Copyright (c) 2013-2017 The Linux Foundation. All rights reserved.
- *
- * Previously licensed under the ISC license by Qualcomm Atheros, Inc.
- *
+ * Copyright (c) 2013-2018 The Linux Foundation. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -17,12 +14,6 @@
  * PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER
  * TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR
  * PERFORMANCE OF THIS SOFTWARE.
- */
-
-/*
- * This file was originally distributed by Qualcomm Atheros, Inc.
- * under proprietary terms before Copyright ownership was assigned
- * to the Linux Foundation.
  */
 
 /*
@@ -212,7 +203,7 @@ static uint8_t *sme_trace_get_command_string(uint32_t command)
 	}
 }
 
-static void sme_trace_dump(tpAniSirGlobal mac_ctx, tp_qdf_trace_record record,
+static void sme_trace_dump(void *mac_ctx, tp_qdf_trace_record record,
 			   uint16_t rec_index)
 {
 	switch (record->code) {
@@ -249,7 +240,6 @@ static void sme_trace_dump(tpAniSirGlobal mac_ctx, tp_qdf_trace_record record,
 
 void sme_trace_init(tpAniSirGlobal pMac)
 {
-	qdf_trace_register(QDF_MODULE_ID_SME, (tp_qdf_trace_cb)
-				&sme_trace_dump);
+	qdf_trace_register(QDF_MODULE_ID_SME, &sme_trace_dump);
 }
 #endif

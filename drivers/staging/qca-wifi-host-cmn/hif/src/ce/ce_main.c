@@ -1,8 +1,5 @@
 /*
- * Copyright (c) 2013-2017 The Linux Foundation. All rights reserved.
- *
- * Previously licensed under the ISC license by Qualcomm Atheros, Inc.
- *
+ * Copyright (c) 2013-2018 The Linux Foundation. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -19,11 +16,6 @@
  * PERFORMANCE OF THIS SOFTWARE.
  */
 
-/*
- * This file was originally distributed by Qualcomm Atheros, Inc.
- * under proprietary terms before Copyright ownership was assigned
- * to the Linux Foundation.
- */
 #include "targcfg.h"
 #include "qdf_lock.h"
 #include "qdf_status.h"
@@ -132,7 +124,7 @@ void hif_trigger_dump(struct hif_opaque_softc *hif_ctx,
 	}
 }
 
-static void ce_poll_timeout(void *arg)
+static void ce_poll_timeout(unsigned long arg)
 {
 	struct CE_state *CE_state = (struct CE_state *)arg;
 
@@ -2321,13 +2313,18 @@ void hif_unconfig_ce(struct hif_softc *hif_sc)
 		if (pipe_info->ce_hdl) {
 			ce_unregister_irq(hif_state, (1 << pipe_num));
 			hif_sc->request_irq_done = false;
+		}
+	}
+	deinit_tasklet_workers(hif_hdl);
+	for (pipe_num = 0; pipe_num < hif_sc->ce_count; pipe_num++) {
+		pipe_info = &hif_state->pipe_info[pipe_num];
+		if (pipe_info->ce_hdl) {
 			ce_fini(pipe_info->ce_hdl);
 			pipe_info->ce_hdl = NULL;
 			pipe_info->buf_sz = 0;
 			qdf_spinlock_destroy(&pipe_info->recv_bufs_needed_lock);
 		}
 	}
-	deinit_tasklet_workers(hif_hdl);
 	if (hif_sc->athdiag_procfs_inited) {
 		athdiag_procfs_remove();
 		hif_sc->athdiag_procfs_inited = false;
@@ -2363,16 +2360,6 @@ static void hif_post_static_buf_to_target(struct hif_softc *scn)
 static inline void hif_post_static_buf_to_target(struct hif_softc *scn)
 {
 }
-#endif
-
-#ifdef WLAN_SUSPEND_RESUME_TEST
-static void hif_fake_apps_init_ctx(struct hif_softc *scn)
-{
-	INIT_WORK(&scn->fake_apps_ctx.resume_work,
-		  hif_fake_apps_resume_work);
-}
-#else
-static inline void hif_fake_apps_init_ctx(struct hif_softc *scn) {}
 #endif
 
 /**

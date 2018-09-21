@@ -1,9 +1,6 @@
 /*
  * Copyright (c) 2012-2018 The Linux Foundation. All rights reserved.
  *
- * Previously licensed under the ISC license by Qualcomm Atheros, Inc.
- *
- *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
  * above copyright notice and this permission notice appear in all
@@ -17,12 +14,6 @@
  * PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER
  * TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR
  * PERFORMANCE OF THIS SOFTWARE.
- */
-
-/*
- * This file was originally distributed by Qualcomm Atheros, Inc.
- * under proprietary terms before Copyright ownership was assigned
- * to the Linux Foundation.
  */
 
 #ifndef WLAN_QCT_WMA_H
@@ -78,6 +69,9 @@
 
 #define WMA_GET_RX_MPDU_DATA(pRxMeta) \
 	(((t_packetmeta *)pRxMeta)->mpdu_data_ptr)
+
+#define WMA_GET_RX_RSSI_CTL_PTR(pRxMeta) \
+		(((t_packetmeta *)pRxMeta)->rssi_per_chain)
 
 #define WMA_GET_RX_MPDU_HEADER_OFFSET(pRxMeta) 0
 
@@ -481,8 +475,8 @@
 #define WMA_REMOVE_BCN_FILTER_CMDID          SIR_HAL_REMOVE_BCN_FILTER_CMDID
 #define WMA_SET_ADAPT_DWELLTIME_CONF_PARAMS  SIR_HAL_SET_ADAPT_DWELLTIME_PARAMS
 
-#define WDA_BPF_GET_CAPABILITIES_REQ         SIR_HAL_BPF_GET_CAPABILITIES_REQ
-#define WDA_BPF_SET_INSTRUCTIONS_REQ         SIR_HAL_BPF_SET_INSTRUCTIONS_REQ
+#define WDA_APF_GET_CAPABILITIES_REQ         SIR_HAL_APF_GET_CAPABILITIES_REQ
+#define WDA_APF_SET_INSTRUCTIONS_REQ         SIR_HAL_APF_SET_INSTRUCTIONS_REQ
 
 #define WMA_SET_PDEV_IE_REQ                  SIR_HAL_SET_PDEV_IE_REQ
 #define WMA_UPDATE_WEP_DEFAULT_KEY           SIR_HAL_UPDATE_WEP_DEFAULT_KEY
@@ -504,6 +498,9 @@
 #define WDA_ACTION_FRAME_RANDOM_MAC          SIR_HAL_ACTION_FRAME_RANDOM_MAC
 
 #define WMA_SET_LIMIT_OFF_CHAN               SIR_HAL_SET_LIMIT_OFF_CHAN
+#define WMA_INVOKE_NEIGHBOR_REPORT           SIR_HAL_INVOKE_NEIGHBOR_REPORT
+
+#define WMA_GET_ROAM_SCAN_STATS              SIR_HAL_GET_ROAM_SCAN_STATS
 
 /* Bit 6 will be used to control BD rate for Management frames */
 #define HAL_USE_BD_RATE2_FOR_MANAGEMENT_FRAME 0x40

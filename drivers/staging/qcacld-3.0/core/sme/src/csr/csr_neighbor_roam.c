@@ -1,8 +1,5 @@
 /*
- * Copyright (c) 2011-2017 The Linux Foundation. All rights reserved.
- *
- * Previously licensed under the ISC license by Qualcomm Atheros, Inc.
- *
+ * Copyright (c) 2011-2018 The Linux Foundation. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -17,12 +14,6 @@
  * PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER
  * TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR
  * PERFORMANCE OF THIS SOFTWARE.
- */
-
-/*
- * This file was originally distributed by Qualcomm Atheros, Inc.
- * under proprietary terms before Copyright ownership was assigned
- * to the Linux Foundation.
  */
 
 /*
@@ -1049,7 +1040,7 @@ static void csr_neighbor_roam_info_ctx_init(
 			}
 		} else
 #endif
-
+		{
 			csr_roam_offload_scan(pMac, session_id,
 				ROAM_SCAN_OFFLOAD_START,
 				REASON_CTX_INIT);
@@ -1061,7 +1052,7 @@ static void csr_neighbor_roam_info_ctx_init(
 					ROAM_SCAN_OFFLOAD_STOP,
 					REASON_SUPPLICANT_DISABLED_ROAMING);
 			}
-
+		}
 	}
 }
 
@@ -1144,7 +1135,6 @@ QDF_STATUS csr_neighbor_roam_indicate_connect(
 		csr_neighbor_roam_reset_init_state_control_info(pMac,
 			session_id);
 		csr_neighbor_roam_info_ctx_init(pMac, session_id);
-
 		return status;
 	}
 #endif

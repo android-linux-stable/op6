@@ -1,9 +1,6 @@
 /*
  * Copyright (c) 2012-2018 The Linux Foundation. All rights reserved.
  *
- * Previously licensed under the ISC license by Qualcomm Atheros, Inc.
- *
- *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
  * above copyright notice and this permission notice appear in all
@@ -17,12 +14,6 @@
  * PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER
  * TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR
  * PERFORMANCE OF THIS SOFTWARE.
- */
-
-/*
- * This file was originally distributed by Qualcomm Atheros, Inc.
- * under proprietary terms before Copyright ownership was assigned
- * to the Linux Foundation.
  */
 
 #ifndef WLAN_QCT_WLANSAP_H
@@ -236,6 +227,7 @@ typedef enum {
 typedef struct sap_StartBssCompleteEvent_s {
 	uint8_t status;
 	uint8_t operatingChannel;
+	enum phy_ch_width ch_width;
 	uint16_t staId;         /* self StaID */
 	uint8_t sessionId;      /* SoftAP SME session ID */
 } tSap_StartBssCompleteEvent;
@@ -294,6 +286,7 @@ typedef struct sap_StationAssocReassocCompleteEvent_s {
 	uint8_t tx_mcs_map;
 	tDot11fIEHTCaps ht_caps;
 	tDot11fIEVHTCaps vht_caps;
+	tSirMacCapabilityInfo capability_info;
 } tSap_StationAssocReassocCompleteEvent;
 
 typedef struct sap_StationDisassocCompleteEvent_s {
@@ -306,6 +299,7 @@ typedef struct sap_StationDisassocCompleteEvent_s {
 	int rssi;
 	int tx_rate;
 	int rx_rate;
+	uint32_t rx_mc_bc_cnt;
 } tSap_StationDisassocCompleteEvent;
 
 typedef struct sap_StationSetKeyCompleteEvent_s {
@@ -499,7 +493,7 @@ typedef struct sap_SSIDInfo {
 struct sap_acs_cfg {
 	/* ACS Algo Input */
 	uint8_t    acs_mode;
-	uint32_t    hw_mode;
+	eCsrPhyMode hw_mode;
 	uint8_t    start_ch;
 	uint8_t    end_ch;
 	uint8_t    *ch_list;
@@ -756,6 +750,7 @@ typedef struct tagSapStruct {
 	bool sap_channel_avoidance;
 #endif /* FEATURE_AP_MCC_CH_AVOIDANCE */
 	bool enable_dfs_phy_error_logs;
+	bool enable_etsi_srd_chan_support;
 } tSapStruct, *tpSapStruct;
 
 #define WPS_PROBRSP_VER_PRESENT                          0x00000001

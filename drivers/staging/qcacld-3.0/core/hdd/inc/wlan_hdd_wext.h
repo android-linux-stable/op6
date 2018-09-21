@@ -1,8 +1,5 @@
 /*
- * Copyright (c) 2012-2017 The Linux Foundation. All rights reserved.
- *
- * Previously licensed under the ISC license by Qualcomm Atheros, Inc.
- *
+ * Copyright (c) 2012-2018 The Linux Foundation. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -17,12 +14,6 @@
  * PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER
  * TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR
  * PERFORMANCE OF THIS SOFTWARE.
- */
-
-/*
- * This file was originally distributed by Qualcomm Atheros, Inc.
- * under proprietary terms before Copyright ownership was assigned
- * to the Linux Foundation.
  */
 
 #ifndef __WEXT_IW_H__
@@ -150,12 +141,6 @@ typedef enum {
 enum hdd_wlan_wmm_ts_info_ack_policy {
 	HDD_WLAN_WMM_TS_INFO_ACK_POLICY_NORMAL_ACK = 0,
 	HDD_WLAN_WMM_TS_INFO_ACK_POLICY_HT_IMMEDIATE_BLOCK_ACK = 1,
-};
-
-/* Source for peer rssi request */
-enum hdd_wlan_get_peer_rssi_source {
-	HDD_WLAN_GET_PEER_RSSI_SOURCE_USER = 0,
-	HDD_WLAN_GET_PEER_RSSI_SOURCE_DRIVER = 1,
 };
 
 /** Maximum Length of WPA/RSN IE */
@@ -331,9 +316,6 @@ extern int hdd_wlan_get_rts_threshold(hdd_adapter_t *pAdapter,
 extern int hdd_wlan_get_frag_threshold(hdd_adapter_t *pAdapter,
 				       union iwreq_data *wrqu);
 extern void hdd_display_stats_help(void);
-extern void hdd_wlan_get_version(hdd_context_t *hdd_ctx,
-				 union iwreq_data *wrqu, char *extra);
-
 extern void hdd_wlan_get_stats(hdd_adapter_t *pAdapter, uint16_t *length,
 			       char *buffer, uint16_t buf_len);
 extern void hdd_wlan_list_fw_profile(uint16_t *length,
@@ -345,7 +327,7 @@ extern int iw_set_essid(struct net_device *dev,
 
 extern int iw_get_essid(struct net_device *dev,
 			struct iw_request_info *info,
-			struct iw_point *dwrq, char *extra);
+			union iwreq_data *dwrq, char *extra);
 
 extern int iw_set_ap_address(struct net_device *dev,
 			     struct iw_request_info *info,
@@ -421,14 +403,13 @@ int wlan_hdd_get_link_speed(hdd_adapter_t *sta_adapter, uint32_t *link_speed);
  * wlan_hdd_get_peer_rssi() - get station's rssi
  * @adapter: hostapd interface
  * @macaddress: peer sta mac address or ff:ff:ff:ff:ff:ff to query all peer
- * @source : source of the request hdd_wlan_get_peer_rssi_source
  *
  * This function will call sme_get_peer_info to get rssi
  *
  * Return: 0 on success, otherwise error value
  */
 int wlan_hdd_get_peer_rssi(hdd_adapter_t *adapter,
-			struct qdf_mac_addr *macaddress, int request_source);
+			struct qdf_mac_addr *macaddress);
 /**
  * wlan_hdd_set_mon_chan() - Set capture channel on the monitor mode interface.
  * @adapter: Handle to adapter

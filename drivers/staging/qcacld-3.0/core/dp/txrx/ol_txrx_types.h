@@ -1,9 +1,6 @@
 /*
  * Copyright (c) 2013-2018 The Linux Foundation. All rights reserved.
  *
- * Previously licensed under the ISC license by Qualcomm Atheros, Inc.
- *
- *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
  * above copyright notice and this permission notice appear in all
@@ -17,12 +14,6 @@
  * PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER
  * TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR
  * PERFORMANCE OF THIS SOFTWARE.
- */
-
-/*
- * This file was originally distributed by Qualcomm Atheros, Inc.
- * under proprietary terms before Copyright ownership was assigned
- * to the Linux Foundation.
  */
 
 /**
@@ -51,6 +42,7 @@
 #include "ol_txrx_osif_api.h" /* ol_rx_callback_fp */
 #include "cdp_txrx_flow_ctrl_v2.h"
 #include "cdp_txrx_peer_ops.h"
+#include <qdf_trace.h>
 
 /*
  * The target may allocate multiple IDs for a peer.
@@ -211,6 +203,7 @@ struct ol_tx_desc_t {
 #endif
 	void *tso_desc;
 	void *tso_num_desc;
+	bool notify_tx_comp;
 };
 
 typedef TAILQ_HEAD(some_struct_name, ol_tx_desc_t) ol_tx_desc_list;
@@ -381,9 +374,10 @@ struct ol_tx_sched_t;
 #ifndef OL_TXRX_NUM_LOCAL_PEER_IDS
 /*
  * Each AP will occupy one ID, so it will occupy two IDs for AP-AP mode.
- * And the remainder IDs will be assigned to other 32 clients.
+ * Clients will be assigned max 32 IDs.
+ * STA(associated)/P2P DEV (self-PEER) will get one ID.
  */
-#define OL_TXRX_NUM_LOCAL_PEER_IDS (2 + 32)
+#define OL_TXRX_NUM_LOCAL_PEER_IDS (32 + 1 + 1 + 1)
 #endif
 
 #ifndef ol_txrx_local_peer_id_t
@@ -529,6 +523,7 @@ struct ol_tx_flow_pool_t {
 /*
  * struct ol_txrx_peer_id_map - Map of firmware peer_ids to peers on host
  * @peer: Pointer to peer object
+ * @peer_ref: Pointer to peer marked as stale
  * @peer_id_ref_cnt: No. of firmware references to the peer_id
  * @del_peer_id_ref_cnt: No. of outstanding unmap events for peer_id
  *                       after the peer object is deleted on the host.
@@ -537,6 +532,7 @@ struct ol_tx_flow_pool_t {
  */
 struct ol_txrx_peer_id_map {
 	struct ol_txrx_peer_t *peer;
+	struct ol_txrx_peer_t *peer_ref;
 	qdf_atomic_t peer_id_ref_cnt;
 	qdf_atomic_t del_peer_id_ref_cnt;
 };
@@ -690,6 +686,8 @@ struct ol_txrx_pdev_t {
 	TAILQ_HEAD(, ol_txrx_stats_req_internal) req_list;
 	int req_list_depth;
 	qdf_spinlock_t req_list_spinlock;
+
+	TAILQ_HEAD(, ol_txrx_roam_stale_peer_t) roam_stale_peer_list;
 
 	/* peer ID to peer object map (array of pointers to peer objects) */
 	struct ol_txrx_peer_id_map *peer_id_to_obj_map;
@@ -1045,6 +1043,12 @@ struct ol_txrx_pdev_t {
 		void (*offld_flush_cb)(void *);
 	} rx_offld_info;
 	struct ol_txrx_peer_t *self_peer;
+
+	/* dp debug fs */
+	struct dentry *dpt_stats_log_dir;
+	enum qdf_dpt_debugfs_state state;
+	struct qdf_debugfs_fops dpt_debugfs_fops;
+
 };
 
 struct ol_txrx_ocb_chan_info {
@@ -1072,6 +1076,9 @@ struct ol_txrx_vdev_t {
 						*/
 	ol_txrx_rx_fp rx; /* receive function used by this vdev */
 	ol_txrx_stats_rx_fp stats_rx; /* receive function used by this vdev */
+
+	/* completion function used by this vdev*/
+	ol_txrx_completion_fp tx_comp;
 
 	struct {
 		/*
@@ -1240,6 +1247,12 @@ struct ol_txrx_cached_bufq_t {
 	uint32_t dropped;
 };
 
+struct ol_txrx_roam_stale_peer_t {
+	ol_txrx_peer_handle peer;
+
+	TAILQ_ENTRY(ol_txrx_roam_stale_peer_t) next_stale_entry;
+};
+
 struct ol_txrx_peer_t {
 	struct ol_txrx_vdev_t *vdev;
 
@@ -1348,8 +1361,7 @@ struct ol_txrx_peer_t {
 	u_int16_t tx_pause_flag;
 #endif
 	qdf_time_t last_assoc_rcvd;
-	qdf_time_t last_disassoc_rcvd;
-	qdf_time_t last_deauth_rcvd;
+	qdf_time_t last_disassoc_deauth_rcvd;
 	qdf_atomic_t fw_create_pending;
 	qdf_timer_t peer_unmap_timer;
 };

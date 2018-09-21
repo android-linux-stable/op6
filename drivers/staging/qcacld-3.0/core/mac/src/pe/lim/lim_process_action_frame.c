@@ -1,8 +1,5 @@
 /*
- * Copyright (c) 2012-2017 The Linux Foundation. All rights reserved.
- *
- * Previously licensed under the ISC license by Qualcomm Atheros, Inc.
- *
+ * Copyright (c) 2012-2018 The Linux Foundation. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -17,12 +14,6 @@
  * PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER
  * TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR
  * PERFORMANCE OF THIS SOFTWARE.
- */
-
-/*
- * This file was originally distributed by Qualcomm Atheros, Inc.
- * under proprietary terms before Copyright ownership was assigned
- * to the Linux Foundation.
  */
 
 /*
@@ -57,6 +48,7 @@
 #include "cds_concurrency.h"
 #include "wma_types.h"
 #include "wma.h"
+#include "dot11f.h"
 
 #define BA_DEFAULT_TX_BUFFER_SIZE 64
 
@@ -1295,6 +1287,7 @@ __lim_process_radio_measure_request(tpAniSirGlobal pMac, uint8_t *pRxPacketInfo,
 	tDot11fRadioMeasurementRequest *frm;
 	uint32_t frameLen, nStatus;
 	uint8_t *pBody;
+	uint16_t curr_seq_num;
 
 	pHdr = WMA_GET_RX_MAC_HEADER(pRxPacketInfo);
 	pBody = WMA_GET_RX_MPDU_DATA(pRxPacketInfo);
@@ -1304,6 +1297,17 @@ __lim_process_radio_measure_request(tpAniSirGlobal pMac, uint8_t *pRxPacketInfo,
 		return;
 	}
 
+	curr_seq_num = ((pHdr->seqControl.seqNumHi <<
+			 HIGH_SEQ_NUM_OFFSET) |
+			pHdr->seqControl.seqNumLo);
+	if (curr_seq_num == pMac->rrm.rrmPEContext.prev_rrm_report_seq_num &&
+	    pMac->rrm.rrmPEContext.pCurrentReq) {
+		pe_err("rrm report req frame, seq num: %d is already in progress, drop it",
+			curr_seq_num);
+		return;
+	}
+	/* Save seq no of currently processing rrm report req frame */
+	pMac->rrm.rrmPEContext.prev_rrm_report_seq_num = curr_seq_num;
 	lim_send_sme_mgmt_frame_ind(pMac, pHdr->fc.subType, (uint8_t *)pHdr,
 		frameLen + sizeof(tSirMacMgmtHdr), 0,
 		WMA_GET_RX_CH(pRxPacketInfo), psessionEntry,
@@ -1449,6 +1453,7 @@ static void __lim_process_sa_query_request_action_frame(tpAniSirGlobal pMac,
 {
 	tpSirMacMgmtHdr pHdr;
 	uint8_t *pBody;
+	uint32_t frame_len;
 	uint8_t transId[2];
 
 	/* Prima  --- Below Macro not available in prima
@@ -1457,7 +1462,12 @@ static void __lim_process_sa_query_request_action_frame(tpAniSirGlobal pMac,
 
 	pHdr = WMA_GET_RX_MAC_HEADER(pRxPacketInfo);
 	pBody = WMA_GET_RX_MPDU_DATA(pRxPacketInfo);
+	frame_len = WMA_GET_RX_PAYLOAD_LEN(pRxPacketInfo);
 
+	if (frame_len < sizeof(struct sDot11fSaQueryReq)) {
+		pe_err("Invalid frame length");
+		return;
+	}
 	/* If this is an unprotected SA Query Request, then ignore it. */
 	if (pHdr->fc.wep == 0)
 		return;
@@ -1509,7 +1519,7 @@ static void __lim_process_sa_query_response_action_frame(tpAniSirGlobal pMac,
 							 tpPESession psessionEntry)
 {
 	tpSirMacMgmtHdr pHdr;
-	uint32_t frameLen;
+	uint32_t frame_len;
 	uint8_t *pBody;
 	tpDphHashNode pSta;
 	uint16_t aid;
@@ -1517,16 +1527,22 @@ static void __lim_process_sa_query_response_action_frame(tpAniSirGlobal pMac,
 	uint8_t retryNum;
 
 	pHdr = WMA_GET_RX_MAC_HEADER(pRxPacketInfo);
-	frameLen = WMA_GET_RX_PAYLOAD_LEN(pRxPacketInfo);
+	frame_len = WMA_GET_RX_PAYLOAD_LEN(pRxPacketInfo);
 	pBody = WMA_GET_RX_MPDU_DATA(pRxPacketInfo);
 	pe_debug("SA Query Response received");
 
+	if (frame_len < sizeof(struct sDot11fSaQueryRsp)) {
+		pe_err("Invalid frame length");
+		return;
+	}
 	/* When a station, supplicant handles SA Query Response.
 	 * Forward to SME to HDD to wpa_supplicant.
 	 */
 	if (LIM_IS_STA_ROLE(psessionEntry)) {
-		lim_send_sme_mgmt_frame_ind(pMac, pHdr->fc.subType, (uint8_t *) pHdr,
-					    frameLen + sizeof(tSirMacMgmtHdr), 0,
+		lim_send_sme_mgmt_frame_ind(pMac, pHdr->fc.subType,
+					    (uint8_t *)pHdr,
+					    frame_len + sizeof(tSirMacMgmtHdr),
+					    0,
 					    WMA_GET_RX_CH(pRxPacketInfo),
 					    psessionEntry,
 					    WMA_GET_RX_RSSI_NORMALIZED(
@@ -1946,7 +1962,12 @@ void lim_process_action_frame(tpAniSirGlobal mac_ctx,
 		}
 	break;
 	case SIR_MAC_ACTION_PUBLIC_USAGE:
+		mac_hdr = WMA_GET_RX_MAC_HEADER(rx_pkt_info);
 		switch (action_hdr->actionID) {
+		case SIR_MAC_ACTION_EXT_CHANNEL_SWITCH_ID:
+			lim_process_ext_channel_switch_action_frame(mac_ctx,
+							rx_pkt_info, session);
+		break;
 		case SIR_MAC_ACTION_VENDOR_SPECIFIC:
 			pub_action =
 				(tpSirMacVendorSpecificPublicActionFrameHdr)
@@ -1955,52 +1976,30 @@ void lim_process_action_frame(tpAniSirGlobal mac_ctx,
 			lim_process_action_vendor_specific(mac_ctx, rx_pkt_info,
 							   pub_action, session);
 		break;
-		/* Handle vendor specific action */
 		case SIR_MAC_ACTION_VENDOR_SPECIFIC_CATEGORY:
-		{
-			tpSirMacMgmtHdr     header;
-
-		header = WMA_GET_RX_MAC_HEADER(rx_pkt_info);
-		lim_send_sme_mgmt_frame_ind(mac_ctx, header->fc.subType,
-		(uint8_t *)header, frame_len + sizeof(tSirMacMgmtHdr), 0,
-		WMA_GET_RX_CH(rx_pkt_info), NULL,
-			WMA_GET_RX_RSSI_RAW(rx_pkt_info));
-			break;
-		}
-
 		case SIR_MAC_ACTION_2040_BSS_COEXISTENCE:
-			mac_hdr = NULL;
-
-			mac_hdr = WMA_GET_RX_MAC_HEADER(rx_pkt_info);
-
-			lim_send_sme_mgmt_frame_ind(mac_ctx,
-					mac_hdr->fc.subType,
-					(uint8_t *) mac_hdr,
-					frame_len + sizeof(tSirMacMgmtHdr),
-					session->smeSessionId,
-					WMA_GET_RX_CH(rx_pkt_info), session,
-					WMA_GET_RX_RSSI_NORMALIZED(
-					rx_pkt_info));
-		break;
+		case SIR_MAC_ACTION_GAS_INITIAL_REQUEST:
+		case SIR_MAC_ACTION_GAS_INITIAL_RESPONSE:
+		case SIR_MAC_ACTION_GAS_COMEBACK_REQUEST:
+		case SIR_MAC_ACTION_GAS_COMEBACK_RESPONSE:
 #ifdef FEATURE_WLAN_TDLS
 		case SIR_MAC_TDLS_DIS_RSP:
-			mac_hdr = NULL;
-
-			mac_hdr = WMA_GET_RX_MAC_HEADER(rx_pkt_info);
-			rssi = WMA_GET_RX_RSSI_NORMALIZED(rx_pkt_info);
-			pe_debug("Public Action TDLS Discovery RSP");
+#endif
+			/*
+			 * Frame forwarded to SME to HDD to supplicant
+			 * type is action
+			 */
+			pe_debug("Public Action Frame %d received",
+				 action_hdr->actionID);
 			lim_send_sme_mgmt_frame_ind(mac_ctx,
-				mac_hdr->fc.subType, (uint8_t *) mac_hdr,
+				mac_hdr->fc.subType,
+				(uint8_t *) mac_hdr,
 				frame_len + sizeof(tSirMacMgmtHdr),
 				session->smeSessionId,
 				WMA_GET_RX_CH(rx_pkt_info), session,
 				WMA_GET_RX_RSSI_NORMALIZED(rx_pkt_info));
 		break;
-#endif
-		case SIR_MAC_ACTION_EXT_CHANNEL_SWITCH_ID:
-			lim_process_ext_channel_switch_action_frame(mac_ctx,
-							rx_pkt_info, session);
-			break;
+
 		default:
 			pe_warn("Unhandled public action frame: %x",
 				action_hdr->actionID);
@@ -2117,8 +2116,9 @@ void lim_process_action_frame(tpAniSirGlobal mac_ctx,
 
 void lim_process_action_frame_no_session(tpAniSirGlobal pMac, uint8_t *pBd)
 {
-	uint8_t *pBody = WMA_GET_RX_MPDU_DATA(pBd);
+	tpSirMacMgmtHdr mac_hdr = WMA_GET_RX_MAC_HEADER(pBd);
 	uint32_t frame_len = WMA_GET_RX_PAYLOAD_LEN(pBd);
+	uint8_t *pBody = WMA_GET_RX_MPDU_DATA(pBd);
 	tpSirMacActionFrameHdr action_hdr = (tpSirMacActionFrameHdr) pBody;
 	tpSirMacVendorSpecificPublicActionFrameHdr vendor_specific;
 
@@ -2132,7 +2132,7 @@ void lim_process_action_frame_no_session(tpAniSirGlobal pMac, uint8_t *pBd)
 
 	switch (action_hdr->category) {
 	case SIR_MAC_ACTION_PUBLIC_USAGE:
-		switch (action_hdr->category) {
+		switch (action_hdr->actionID) {
 		case SIR_MAC_ACTION_VENDOR_SPECIFIC:
 			vendor_specific =
 				(tpSirMacVendorSpecificPublicActionFrameHdr)
@@ -2140,6 +2140,24 @@ void lim_process_action_frame_no_session(tpAniSirGlobal pMac, uint8_t *pBd)
 			lim_process_action_vendor_specific(pMac, pBd,
 							   vendor_specific,
 							   NULL);
+		break;
+		case SIR_MAC_ACTION_GAS_INITIAL_REQUEST:
+		case SIR_MAC_ACTION_GAS_INITIAL_RESPONSE:
+		case SIR_MAC_ACTION_GAS_COMEBACK_REQUEST:
+		case SIR_MAC_ACTION_GAS_COMEBACK_RESPONSE:
+			/*
+			 * Frame forwarded to SME to HDD to supplicant
+			 * type is action
+			 */
+			pe_debug("Public Action Frame %d received",
+				 action_hdr->actionID);
+			lim_send_sme_mgmt_frame_ind(pMac,
+				mac_hdr->fc.subType,
+				(uint8_t *) mac_hdr,
+				frame_len + sizeof(tSirMacMgmtHdr), 0,
+				WMA_GET_RX_CH(pBd), NULL,
+				WMA_GET_RX_RSSI_NORMALIZED(pBd));
+
 		break;
 		default:
 			pe_warn("Unhandled public action frame: %x",
@@ -2149,8 +2167,7 @@ void lim_process_action_frame_no_session(tpAniSirGlobal pMac, uint8_t *pBd)
 		break;
 	default:
 		pe_warn("Unhandled action frame without session: %x",
-			       action_hdr->category);
+			action_hdr->category);
 		break;
-
 	}
 }

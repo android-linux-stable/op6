@@ -1,8 +1,5 @@
 /*
- * Copyright (c) 2011-2017 The Linux Foundation. All rights reserved.
- *
- * Previously licensed under the ISC license by Qualcomm Atheros, Inc.
- *
+ * Copyright (c) 2011-2018 The Linux Foundation. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -17,12 +14,6 @@
  * PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER
  * TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR
  * PERFORMANCE OF THIS SOFTWARE.
- */
-
-/*
- * This file was originally distributed by Qualcomm Atheros, Inc.
- * under proprietary terms before Copyright ownership was assigned
- * to the Linux Foundation.
  */
 
 /*
@@ -167,6 +158,7 @@ lim_collect_bss_description(tpAniSirGlobal pMac,
 	uint8_t channelNum;
 	uint8_t rxChannel;
 	uint8_t rfBand = 0;
+	uint32_t *rssi_per_chain;
 
 	pHdr = WMA_GET_RX_MAC_HEADER(pRxPacketInfo);
 
@@ -298,18 +290,23 @@ lim_collect_bss_description(tpAniSirGlobal pMac,
 	pBssDescr->rssi = (int8_t) WMA_GET_RX_RSSI_NORMALIZED(pRxPacketInfo);
 	pBssDescr->rssi_raw = (int8_t) WMA_GET_RX_RSSI_RAW(pRxPacketInfo);
 
+	/* Copy per chain rssi */
+
+	rssi_per_chain = WMA_GET_RX_RSSI_CTL_PTR(pRxPacketInfo);
+	qdf_mem_copy(pBssDescr->rssi_per_chain, rssi_per_chain,
+					sizeof(pBssDescr->rssi_per_chain));
+
 	/* SINR no longer reported by HW */
 	pBssDescr->sinr = 0;
 	pBssDescr->received_time = (uint64_t)qdf_mc_timer_get_system_time();
 	pBssDescr->tsf_delta = WMA_GET_RX_TSF_DELTA(pRxPacketInfo);
 	pBssDescr->seq_ctrl = pHdr->seqControl;
 
-	pe_debug(MAC_ADDRESS_STR
-		" rssi: norm %d abs %d tsf_delta %u RcvdTime %llu ssid %s",
-		MAC_ADDR_ARRAY(pHdr->bssId), pBssDescr->rssi,
-		pBssDescr->rssi_raw, pBssDescr->tsf_delta,
-		pBssDescr->received_time,
-		((pBPR->ssidPresent) ? (char *)pBPR->ssId.ssId : ""));
+	pe_debug("Received %s from BSSID: %pM tsf_delta = %u Seq Num: %x ssid:%.*s, rssi: %d",
+		 pBssDescr->fProbeRsp ? "Probe Rsp" : "Beacon", pHdr->bssId,
+		 pBssDescr->tsf_delta, ((pHdr->seqControl.seqNumHi <<
+		 HIGH_SEQ_NUM_OFFSET) | pHdr->seqControl.seqNumLo),
+		 pBPR->ssId.length, pBPR->ssId.ssId, pBssDescr->rssi_raw);
 
 	if (fScanning) {
 		rrm_get_start_tsf(pMac, pBssDescr->startTSF);
@@ -344,8 +341,6 @@ lim_collect_bss_description(tpAniSirGlobal pMac,
 	/*set channel number in beacon in case it is not present */
 	pBPR->channelNumber = pBssDescr->channelId;
 
-	pe_debug("Collected BSS Description for Channel: %1d length: %u IE Fields: %u",
-		pBssDescr->channelId, pBssDescr->length, ieLen);
 	pMac->lim.beacon_probe_rsp_cnt_per_scan++;
 
 	return;

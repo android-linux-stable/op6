@@ -1,8 +1,5 @@
 /*
- * Copyright (c) 2012-2017 The Linux Foundation. All rights reserved.
- *
- * Previously licensed under the ISC license by Qualcomm Atheros, Inc.
- *
+ * Copyright (c) 2012-2018 The Linux Foundation. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -17,12 +14,6 @@
  * PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER
  * TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR
  * PERFORMANCE OF THIS SOFTWARE.
- */
-
-/*
- * This file was originally distributed by Qualcomm Atheros, Inc.
- * under proprietary terms before Copyright ownership was assigned
- * to the Linux Foundation.
  */
 
 /**
@@ -2169,6 +2160,8 @@ static bool cds_current_concurrency_is_mcc(void)
  * @chain_mask: Chain mask
  * @vdev_id: vdev id
  * @in_use: Flag to indicate if the index is in use or not
+ * @update_conn: Flag to indicate if mode change event should
+ *  be sent or not
  *
  * Updates the index value of the concurrent connection list
  *
@@ -2182,7 +2175,8 @@ static void cds_update_conc_list(uint32_t conn_index,
 		enum cds_chain_mode chain_mask,
 		uint32_t original_nss,
 		uint32_t vdev_id,
-		bool in_use)
+		bool in_use,
+		bool update_conn)
 {
 	cds_context_type *cds_ctx;
 	bool mcc_mode;
@@ -2214,6 +2208,14 @@ static void cds_update_conc_list(uint32_t conn_index,
 	if (cds_ctx->ol_txrx_update_mac_id_cb)
 		cds_ctx->ol_txrx_update_mac_id_cb(vdev_id, mac);
 
+	/*
+	 * For STA and P2P client mode, the mode change event sent as part
+	 * of the callback causes delay in processing M1 frame at supplicant
+	 * resulting in cert test case failure. The mode change event is sent
+	 * as part of add key for STA and P2P client mode.
+	 */
+	if (cds_ctx->mode_change_cb && update_conn)
+		cds_ctx->mode_change_cb();
 
 	/* IPA only cares about STA or SAP mode */
 	if (mode == CDS_STA_MODE || mode == CDS_SAP_MODE) {
@@ -2586,7 +2588,7 @@ void cds_set_dual_mac_scan_config(uint8_t dbs_val,
 		return;
 	}
 
-	cfg.set_dual_mac_cb = (void *)cds_soc_set_dual_mac_cfg_cb;
+	cfg.set_dual_mac_cb = cds_soc_set_dual_mac_cfg_cb;
 
 	cds_debug("scan_config:%x fw_mode_config:%x",
 			cfg.scan_config, cfg.fw_mode_config);
@@ -2642,7 +2644,7 @@ void cds_set_dual_mac_fw_mode_config(uint8_t dbs, uint8_t dfs)
 		return;
 	}
 
-	cfg.set_dual_mac_cb = (void *)cds_soc_set_dual_mac_cfg_cb;
+	cfg.set_dual_mac_cb = cds_soc_set_dual_mac_cfg_cb;
 
 	cds_debug("scan_config:%x fw_mode_config:%x",
 			cfg.scan_config, cfg.fw_mode_config);
@@ -2675,6 +2677,13 @@ static void cds_pdev_set_hw_mode_cb(uint32_t status,
 	QDF_STATUS ret;
 	struct sir_hw_mode_params hw_mode;
 	uint32_t i;
+	cds_context_type *cds_ctx;
+
+	cds_ctx = cds_get_context(QDF_MODULE_ID_QDF);
+	if (!cds_ctx) {
+		cds_err("Invalid CDS Context");
+		return;
+	}
 
 	cds_set_hw_mode_change_in_progress(CDS_HW_MODE_NOT_IN_PROGRESS);
 
@@ -2723,6 +2732,9 @@ static void cds_pdev_set_hw_mode_cb(uint32_t status,
 	if (!QDF_IS_STATUS_SUCCESS(ret))
 		cds_err("ERROR: set connection_update_done event failed");
 
+	if (cds_ctx->mode_change_cb)
+		cds_ctx->mode_change_cb();
+
 	return;
 }
 
@@ -2746,6 +2758,13 @@ void cds_hw_mode_transition_cb(uint32_t old_hw_mode_index,
 	QDF_STATUS status;
 	struct sir_hw_mode_params hw_mode;
 	uint32_t i;
+	cds_context_type *cds_ctx;
+
+	cds_ctx = cds_get_context(QDF_MODULE_ID_QDF);
+	if (!cds_ctx) {
+		cds_err("Invalid CDS Context");
+		return;
+	}
 
 	if (!vdev_mac_map) {
 		cds_err("vdev_mac_map is NULL");
@@ -2777,6 +2796,9 @@ void cds_hw_mode_transition_cb(uint32_t old_hw_mode_index,
 	cds_update_hw_mode_conn_info(num_vdev_mac_entries,
 					  vdev_mac_map,
 					  hw_mode);
+
+	if (cds_ctx->mode_change_cb)
+		cds_ctx->mode_change_cb();
 
 	return;
 }
@@ -3674,6 +3696,8 @@ void cds_set_tdls_ct_mode(hdd_context_t *hdd_ctx)
 	if (hdd_ctx->config->fTDLSExternalControl) {
 		if (hdd_ctx->tdls_external_peer_count)
 			state = true;
+		else if (hdd_ctx->connected_peer_count >= 1)
+			state = true;
 		else
 			state = false;
 	}
@@ -3844,6 +3868,45 @@ static void cds_pdev_set_pcl(enum tQDF_ADAPTER_MODE mode)
 #endif
 
 /**
+ * cds_get_qdf_mode_from_cds - provides the
+ * type translation from policy manager type
+ * to generic connection mode type
+ * @device_mode: policy manager mode type
+ *
+ *
+ * This function provides the type translation
+ *
+ * Return: tQDF_ADAPTER_MODE enum
+ */
+static enum tQDF_ADAPTER_MODE cds_get_qdf_mode_from_cds(
+			enum cds_con_mode device_mode)
+{
+	enum tQDF_ADAPTER_MODE mode = QDF_MAX_NO_OF_MODE;
+
+	switch (device_mode) {
+	case CDS_STA_MODE:
+		mode = QDF_STA_MODE;
+		break;
+	case CDS_SAP_MODE:
+		mode = QDF_SAP_MODE;
+		break;
+	case CDS_P2P_CLIENT_MODE:
+		mode = QDF_P2P_CLIENT_MODE;
+		break;
+	case CDS_P2P_GO_MODE:
+		mode = QDF_P2P_GO_MODE;
+		break;
+	case CDS_IBSS_MODE:
+		mode = QDF_IBSS_MODE;
+		break;
+	default:
+		cds_err("Unsupported cds mode (%d)",
+			device_mode);
+	}
+	return mode;
+}
+
+/**
  * cds_set_pcl_for_existing_combo() - Set PCL for existing connection
  * @mode: Connection mode of type 'cds_con_mode'
  *
@@ -3864,26 +3927,9 @@ static void cds_set_pcl_for_existing_combo(enum cds_con_mode mode)
 		cds_err("Invalid CDS Context");
 		return;
 	}
-	switch (mode) {
-	case CDS_STA_MODE:
-		pcl_mode = QDF_STA_MODE;
-		break;
-	case CDS_SAP_MODE:
-		pcl_mode = QDF_SAP_MODE;
-		break;
-	case CDS_P2P_CLIENT_MODE:
-		pcl_mode = QDF_P2P_CLIENT_MODE;
-		break;
-	case CDS_P2P_GO_MODE:
-		pcl_mode = QDF_P2P_GO_MODE;
-		break;
-	case CDS_IBSS_MODE:
-		pcl_mode = QDF_IBSS_MODE;
-		break;
-	default:
-		cds_err("Invalid mode to set PCL");
+	pcl_mode = cds_get_qdf_mode_from_cds(mode);
+	if (pcl_mode == QDF_MAX_NO_OF_MODE)
 		return;
-	};
 	qdf_mutex_acquire(&cds_ctx->qdf_conc_list_lock);
 	if (cds_mode_specific_connection_count(mode, NULL) > 0) {
 		/* Check, store and temp delete the mode's parameter */
@@ -4381,6 +4427,12 @@ QDF_STATUS cds_deinit_policy_mgr(void)
 		QDF_ASSERT(0);
 	}
 
+	if (!QDF_IS_STATUS_SUCCESS(qdf_event_destroy
+				  (&cds_ctx->channel_switch_complete))) {
+		cds_err("Failed to destroy channel switch complete");
+		status = QDF_STATUS_E_FAILURE;
+	}
+
 	return status;
 }
 
@@ -4441,6 +4493,13 @@ QDF_STATUS cds_init_policy_mgr(struct cds_sme_cbacks *sme_cbacks)
 	if (QDF_IS_STATUS_ERROR(status)) {
 		cds_err("failed to reset mandatory channels");
 		return status;
+	}
+
+	status = qdf_event_create(&cds_ctx->channel_switch_complete);
+
+	if (!QDF_IS_STATUS_SUCCESS(status)) {
+		cds_err("channel switch complete init event failed");
+		return QDF_STATUS_E_FAILURE;
 	}
 
 	return QDF_STATUS_SUCCESS;
@@ -4592,6 +4651,7 @@ QDF_STATUS cds_incr_connection_count(uint32_t vdev_id)
 	enum cds_con_mode mode;
 	uint8_t chan;
 	uint32_t nss = 0;
+	bool update_conn = true;
 
 	hdd_ctx = cds_get_context(QDF_MODULE_ID_HDD);
 	if (!hdd_ctx) {
@@ -4633,6 +4693,8 @@ QDF_STATUS cds_incr_connection_count(uint32_t vdev_id)
 		cds_err("Error in getting nss");
 	}
 
+	if (mode == CDS_STA_MODE || mode == CDS_P2P_CLIENT_MODE)
+		update_conn = false;
 
 	/* add the entry */
 	cds_update_conc_list(conn_index,
@@ -4641,7 +4703,7 @@ QDF_STATUS cds_incr_connection_count(uint32_t vdev_id)
 			cds_get_bw(wma_conn_table_entry->chan_width),
 			wma_conn_table_entry->mac_id,
 			chain_mask,
-			nss, vdev_id, true);
+			nss, vdev_id, true, update_conn);
 	cds_debug("Add at idx:%d vdev %d mac=%d",
 		conn_index, vdev_id,
 		wma_conn_table_entry->mac_id);
@@ -4727,7 +4789,7 @@ QDF_STATUS cds_update_connection_info(uint32_t vdev_id)
 			cds_get_bw(wma_conn_table_entry->chan_width),
 			wma_conn_table_entry->mac_id,
 			chain_mask,
-			nss, vdev_id, true);
+			nss, vdev_id, true, true);
 	return QDF_STATUS_SUCCESS;
 }
 
@@ -4735,7 +4797,6 @@ QDF_STATUS cds_update_connection_info(uint32_t vdev_id)
  * cds_decr_connection_count() - remove the old connection
  * from the current connections list
  * @vdev_id: vdev id of the old connection
- *
  *
  * This function removes the old connection from the current
  * connections list
@@ -5122,16 +5183,16 @@ static QDF_STATUS cds_get_channel_list(enum cds_pcl_type pcl,
 	uint8_t channel_list_24[QDF_MAX_NUM_CHAN] = {0};
 	uint8_t channel_list_5[QDF_MAX_NUM_CHAN] = {0};
 	bool skip_dfs_channel = false;
-	hdd_context_t *hdd_ctx;
+	bool skip_srd_chan = false;
 	uint32_t i = 0, j = 0;
 	bool sta_sap_scc_on_dfs_chan;
+	struct cds_config_info *cds_cfg;
 
-	hdd_ctx = cds_get_context(QDF_MODULE_ID_HDD);
-	if (!hdd_ctx) {
-		cds_err("HDD context is NULL");
+	cds_cfg = cds_get_ini_config();
+	if (!cds_cfg) {
+		cds_err("cds config is NULL");
 		return status;
 	}
-
 	if ((NULL == pcl_channels) || (NULL == len)) {
 		cds_err("pcl_channels or len is NULL");
 		return status;
@@ -5162,13 +5223,17 @@ static QDF_STATUS cds_get_channel_list(enum cds_pcl_type pcl,
 	sta_sap_scc_on_dfs_chan = cds_is_sta_sap_scc_allowed_on_dfs_channel();
 	cds_debug("sta_sap_scc_on_dfs_chan %u", sta_sap_scc_on_dfs_chan);
 
-	if ((((mode == CDS_SAP_MODE) || (mode == CDS_P2P_GO_MODE)) &&
-		(cds_mode_specific_connection_count(CDS_STA_MODE, NULL) > 0)) ||
-		!sta_sap_scc_on_dfs_chan) {
+	if (((mode == CDS_SAP_MODE) || (mode == CDS_P2P_GO_MODE)) &&
+		(cds_mode_specific_connection_count(CDS_STA_MODE, NULL) > 0) &&
+		(!sta_sap_scc_on_dfs_chan)) {
 		cds_debug("STA present, skip DFS channels from pcl for SAP/Go");
 		skip_dfs_channel = true;
 	}
 
+	if ((mode == CDS_SAP_MODE) || (mode == CDS_P2P_GO_MODE)) {
+		skip_srd_chan = !cds_cfg->etsi_srd_chan_in_master_mode &&
+			cds_is_5g_regdmn_etsi13();
+	}
 	/* Let's divide the list in 2.4 & 5 Ghz lists */
 	while ((chan_index < QDF_MAX_NUM_CHAN) &&
 		(channel_list[chan_index] <= 11) &&
@@ -5192,9 +5257,16 @@ static QDF_STATUS cds_get_channel_list(enum cds_pcl_type pcl,
 	}
 
 	while ((chan_index < num_channels) &&
-		(chan_index_5 < QDF_MAX_NUM_CHAN)) {
+	       (chan_index_5 < QDF_MAX_NUM_CHAN) &&
+	       (chan_index < QDF_MAX_NUM_CHAN)) {
 		if ((true == skip_dfs_channel) &&
 		    CDS_IS_DFS_CH(channel_list[chan_index])) {
+			chan_index++;
+			continue;
+		}
+		if ((true == skip_srd_chan) &&
+				cds_is_etsi13_regdmn_srd_chan(cds_chan_to_freq(
+					channel_list[chan_index]))) {
 			chan_index++;
 			continue;
 		}
@@ -5425,12 +5497,14 @@ static QDF_STATUS cds_get_channel_list(enum cds_pcl_type pcl,
 		cds_debug("pcl len (%d) and weight list len mismatch (%d)",
 			*len, i);
 
-	/* check the channel avoidance list */
+	/* check the channel avoidance list for beaconing entities */
+	if ((mode == CDS_SAP_MODE) || (mode == CDS_P2P_GO_MODE))
 	cds_update_with_safe_channel_list(pcl_channels, len,
 				pcl_weights, weight_len);
 
-	cds_remove_dfs_passive_channels_from_pcl(pcl_channels, len,
-			pcl_weights, weight_len);
+	cds_remove_dfs_passive_channels_from_pcl(pcl_channels,
+						 len, pcl_weights,
+						 weight_len);
 
 	return status;
 }
@@ -5543,6 +5617,74 @@ uint8_t cds_get_channel(enum cds_con_mode mode, uint32_t *vdev_id)
 }
 
 /**
+ * cds_is_dbs_allowed_for_concurrency() - If dbs is allowed for current
+ * concurreny
+ * @new_conn_mode: new connection mode
+ *
+ * When a new connection is about to come up, check if dbs is allowed for
+ * STA+STA or STA+P2P
+ *
+ * Return: true if dbs is allowed for STA+STA or STA+P2P else false
+ */
+static bool cds_is_dbs_allowed_for_concurrency(
+		enum tQDF_ADAPTER_MODE new_conn_mode)
+{
+	hdd_context_t *hdd_ctx;
+	uint32_t count, dbs_for_sta_sta, dbs_for_sta_p2p;
+	bool ret = true;
+
+	count = cds_get_connection_count();
+
+	hdd_ctx = cds_get_context(QDF_MODULE_ID_HDD);
+	if (!hdd_ctx) {
+		cds_err("HDD context is NULL");
+		return ret;
+	}
+
+	if (count != 1)
+		return ret;
+
+	dbs_for_sta_sta = WMA_CHANNEL_SELECT_LOGIC_STA_STA_GET(hdd_ctx->config->
+						     channel_select_logic_conc);
+	dbs_for_sta_p2p = WMA_CHANNEL_SELECT_LOGIC_STA_P2P_GET(hdd_ctx->config->
+						     channel_select_logic_conc);
+
+	switch (conc_connection_list[0].mode) {
+	case CDS_STA_MODE:
+		switch (new_conn_mode) {
+		case QDF_STA_MODE:
+			if (!dbs_for_sta_sta)
+				return false;
+			break;
+		case QDF_P2P_DEVICE_MODE:
+		case QDF_P2P_CLIENT_MODE:
+		case QDF_P2P_GO_MODE:
+			if (!dbs_for_sta_p2p)
+				return false;
+			break;
+		default:
+			break;
+		}
+		break;
+	case CDS_P2P_CLIENT_MODE:
+	case CDS_P2P_GO_MODE:
+		switch (new_conn_mode) {
+		case CDS_STA_MODE:
+			if (!dbs_for_sta_p2p)
+				return false;
+			break;
+		default:
+			break;
+		}
+		break;
+	default:
+		break;
+	}
+
+	return ret;
+}
+
+/**
  * cds_get_pcl() - provides the preferred channel list for
  * new connection
  * @mode:	Device mode
@@ -5571,6 +5713,7 @@ QDF_STATUS cds_get_pcl(enum cds_con_mode mode,
 	enum cds_conc_priority_mode conc_system_pref = 0;
 	enum cds_conc_priority_mode cur_conc_system_pref = 0;
 	hdd_context_t *hdd_ctx;
+	enum tQDF_ADAPTER_MODE qdf_mode;
 
 	hdd_ctx = cds_get_context(QDF_MODULE_ID_HDD);
 	if (!hdd_ctx) {
@@ -5579,11 +5722,6 @@ QDF_STATUS cds_get_pcl(enum cds_con_mode mode,
 	}
 	if ((mode < 0) || (mode >= CDS_MAX_NUM_OF_MODE)) {
 		cds_err("Incorrect concurrency mode:%d recieved", mode);
-		return status;
-	}
-
-	if (mode >= CDS_MAX_NUM_OF_MODE) {
-		cds_err("requested mode:%d is not supported", mode);
 		return status;
 	}
 
@@ -5624,7 +5762,11 @@ QDF_STATUS cds_get_pcl(enum cds_con_mode mode,
 			cds_err("couldn't find index for 2nd connection pcl table");
 			return status;
 		}
-		if (wma_is_hw_dbs_capable() == true) {
+		qdf_mode = cds_get_qdf_mode_from_cds(mode);
+		if (qdf_mode == QDF_MAX_NO_OF_MODE)
+			return QDF_STATUS_E_FAILURE;
+		if (wma_is_hw_dbs_capable() == true &&
+			cds_is_dbs_allowed_for_concurrency(qdf_mode)) {
 			pcl = second_connection_pcl_dbs_table
 				[second_index][mode][conc_system_pref];
 		} else {
@@ -5889,13 +6031,30 @@ bool cds_allow_sap_go_concurrency(enum cds_con_mode mode, uint8_t channel)
 
 	if ((mode == CDS_SAP_MODE || mode == CDS_P2P_GO_MODE) && (sap_cnt ||
 				go_cnt)) {
-		if (!wma_is_dbs_enable()) {
-			/* Don't allow second SAP/GO interface if DBS is not
-			 * supported */
-			cds_debug("DBS is not supported, don't allow second SAP interface");
+		if (wma_dual_beacon_on_single_mac_mcc_capable())
+			return true;
+		if (wma_dual_beacon_on_single_mac_scc_capable()) {
+			for (id = 0; id < MAX_NUMBER_OF_CONC_CONNECTIONS;
+				id++) {
+				if (conc_connection_list[id].in_use) {
+					con_mode =
+						conc_connection_list[id].mode;
+					con_chan =
+						conc_connection_list[id].chan;
+					if (((con_mode == CDS_SAP_MODE) ||
+					    (con_mode == CDS_P2P_GO_MODE)) &&
+						(channel != con_chan)) {
+						cds_debug("Scc is supported, but first SAP and second SAP are not in same channel, So don't allow second SAP interface");
+						return false;
+					}
+				}
+			}
+			return true;
+		}
+		if (!wma_is_hw_dbs_capable()) {
+			cds_debug("DBS is not supported, mcc and scc are not supported too, don't allow second SAP interface");
 			return false;
 		}
-
 		/* If DBS is supported then allow second SAP/GO session only if
 		 * the freq band of the second SAP/GO interface is different
 		 * than the first SAP/GO interface.
@@ -5919,29 +6078,15 @@ bool cds_allow_sap_go_concurrency(enum cds_con_mode mode, uint8_t channel)
 	return true;
 }
 
-/**
- * cds_allow_concurrency() - Check for allowed concurrency
- * combination
- * @mode:	new connection mode
- * @channel: channel on which new connection is coming up
- * @bw: Bandwidth requested by the connection (optional)
- *
- * When a new connection is about to come up check if current
- * concurrency combination including the new connection is
- * allowed or not based on the HW capability
- *
- * Return: True/False
- */
-bool cds_allow_concurrency(enum cds_con_mode mode,
-				uint8_t channel, enum hw_mode_bandwidth bw)
+bool cds_is_concurrency_allowed(enum cds_con_mode mode,
+				       uint8_t channel,
+				       enum hw_mode_bandwidth bw)
 {
 	uint32_t num_connections = 0, count = 0, index = 0;
 	bool status = false, match = false;
 	uint32_t list[MAX_NUMBER_OF_CONC_CONNECTIONS];
 	hdd_context_t *hdd_ctx;
 	cds_context_type *cds_ctx;
-	QDF_STATUS ret;
-	struct sir_pcl_list pcl;
 	bool is_sta_sap_on_dfs_chan;
 
 
@@ -5955,15 +6100,6 @@ bool cds_allow_concurrency(enum cds_con_mode mode,
 	if (!cds_ctx) {
 		cds_err("Invalid CDS Context");
 		return status;
-	}
-
-
-	qdf_mem_zero(&pcl, sizeof(pcl));
-	ret = cds_get_pcl(mode, pcl.pcl_list, &pcl.pcl_len,
-			pcl.weight_list, QDF_ARRAY_SIZE(pcl.weight_list));
-	if (QDF_IS_STATUS_ERROR(ret)) {
-		cds_err("disallow connection:%d", ret);
-		goto done;
 	}
 
 	/* find the current connection state from conc_connection_list*/
@@ -6137,6 +6273,37 @@ bool cds_allow_concurrency(enum cds_con_mode mode,
 
 done:
 	return status;
+}
+
+/**
+ * cds_allow_concurrency() - Check for allowed concurrency
+ * combination consulting the PCL
+ * @mode:	new connection mode
+ * @channel: channel on which new connection is coming up
+ * @bw: Bandwidth requested by the connection (optional)
+ *
+ * When a new connection is about to come up check if current
+ * concurrency combination including the new connection is
+ * allowed or not based on the HW capability
+ *
+ * Return: True/False
+ */
+bool cds_allow_concurrency(enum cds_con_mode mode,
+				 uint8_t channel,
+				 enum hw_mode_bandwidth bw)
+{
+	struct sir_pcl_list pcl;
+	QDF_STATUS status;
+
+	qdf_mem_zero(&pcl, sizeof(pcl));
+	status = cds_get_pcl(mode, pcl.pcl_list, &pcl.pcl_len,
+			     pcl.weight_list,
+			     QDF_ARRAY_SIZE(pcl.weight_list));
+	if (QDF_IS_STATUS_ERROR(status)) {
+		cds_err("disallow connection:%d", status);
+		return false;
+	}
+	return cds_is_concurrency_allowed(mode, channel, bw);
 }
 
 /**
@@ -6677,6 +6844,8 @@ QDF_STATUS cds_current_connections_update(uint32_t session_id,
 	cds_context_type *cds_ctx;
 	hdd_context_t *hdd_ctx;
 	QDF_STATUS status = QDF_STATUS_E_FAILURE;
+	hdd_adapter_t *adapter;
+	enum tQDF_ADAPTER_MODE nw_con_mode;
 
 	cds_ctx = cds_get_context(QDF_MODULE_ID_QDF);
 	if (!cds_ctx) {
@@ -6689,6 +6858,13 @@ QDF_STATUS cds_current_connections_update(uint32_t session_id,
 		cds_err("Invalid HDD context");
 		return QDF_STATUS_E_FAILURE;
 	}
+
+	adapter = hdd_get_adapter_by_sme_session_id(hdd_ctx, session_id);
+	if (!adapter) {
+		cds_err("Invalid HDD adapter");
+		return QDF_STATUS_E_FAILURE;
+	}
+	nw_con_mode = adapter->device_mode;
 
 	if (wma_is_hw_dbs_capable() == false) {
 		cds_err("driver isn't dbs capable, no further action needed");
@@ -6732,6 +6908,22 @@ QDF_STATUS cds_current_connections_update(uint32_t session_id,
 		cds_err("unexpected num_connections value %d", num_connections);
 		break;
 	}
+
+	/*
+	 * Based on channel_select_logic_conc ini, hw mode is set
+	 * when second connection is about to come up that results
+	 * in STA+STA and STA+P2P concurrency.
+	 * 1) If MCC is set and if current hw mode is dbs, hw mode
+	 *  should be set to single mac for above concurrency.
+	 * 2) If MCC is set and if current hw mode is not dbs, hw
+	 *  mode change is not required.
+	 */
+	if (wma_is_current_hwmode_dbs() &&
+	    !cds_is_dbs_allowed_for_concurrency(nw_con_mode))
+		next_action = CDS_SINGLE_MAC;
+	else if (!wma_is_current_hwmode_dbs() &&
+		 !cds_is_dbs_allowed_for_concurrency(nw_con_mode))
+		next_action = CDS_NOP;
 
 	if (CDS_NOP != next_action)
 		status = cds_next_actions(session_id,
@@ -7793,6 +7985,26 @@ static bool cds_is_sap_restart_required_after_sta_disconnect(
 	return true;
 }
 
+void cds_flush_sta_ap_intf_work(hdd_context_t *hdd_ctx)
+{
+	ENTER();
+
+	if (hdd_ctx->sta_ap_intf_check_work_info)
+		cds_flush_work(&hdd_ctx->sta_ap_intf_check_work);
+	/*
+	 * when sta_ap_intf_check_work is flushed above the work could already
+	 * been running which will free the sta_ap_intf_check_work_info memory.
+	 * So sanitize the sta_ap_intf_check_work_info and free the memory
+	 * if not already freed.
+	 */
+	if (hdd_ctx->sta_ap_intf_check_work_info) {
+		qdf_mem_free(hdd_ctx->sta_ap_intf_check_work_info);
+		hdd_ctx->sta_ap_intf_check_work_info = NULL;
+	}
+
+	EXIT();
+}
+
 /**
  * __cds_check_sta_ap_concurrent_ch_intf() - Restart SAP in
  * STA-AP case
@@ -7813,6 +8025,7 @@ static void __cds_check_sta_ap_concurrent_ch_intf(void *data)
 	p_cds_contextType cds_ctx;
 	hdd_station_ctx_t *hdd_sta_ctx;
 	bool skip_conc_check = false;
+	QDF_STATUS status;
 
 	cds_ctx = cds_get_global_context();
 	if (!cds_ctx) {
@@ -7915,17 +8128,21 @@ sap_restart:
 				hdd_ap_ctx->sapConfig.channel, intf_ch);
 	}
 	hdd_ap_ctx->sapConfig.channel = intf_ch;
-	hdd_ap_ctx->sapConfig.ch_params.ch_width =
-		hdd_ap_ctx->sapConfig.ch_width_orig;
+	hdd_ap_ctx->sapConfig.ch_params.ch_width = CH_WIDTH_MAX;
 	hdd_ap_ctx->bss_stop_reason = BSS_STOP_DUE_TO_MCC_SCC_SWITCH;
 	cds_set_channel_params(hdd_ap_ctx->sapConfig.channel,
 			hdd_ap_ctx->sapConfig.sec_ch,
 			&hdd_ap_ctx->sapConfig.ch_params);
 
-	if (((hdd_ctx->config->WlanMccToSccSwitchMode ==
-		QDF_MCC_TO_SCC_SWITCH_FORCE_WITHOUT_DISCONNECTION) ||
-		(hdd_ctx->config->WlanMccToSccSwitchMode ==
-		QDF_MCC_TO_SCC_SWITCH_WITH_FAVORITE_CHANNEL)) &&
+	cds_debug("wait if channel switch is already in progress");
+
+	status = qdf_wait_single_event(
+			&cds_ctx->channel_switch_complete,
+			CHANNEL_SWITCH_COMPLETE_TIMEOUT);
+	if (!QDF_IS_STATUS_SUCCESS(status))
+		cds_err("wait for event failed, still continue with channel switch");
+
+	if (cds_is_force_scc() &&
 		(cds_ctx->sap_restart_chan_switch_cb)) {
 		cds_debug("SAP chan change without restart");
 		cds_ctx->sap_restart_chan_switch_cb(ap_adapter,
@@ -7951,8 +8168,16 @@ static void cds_check_sta_ap_concurrent_ch_intf(void *data)
 
 static bool cds_valid_sta_channel_check(uint8_t sta_channel)
 {
-	if ((CDS_IS_DFS_CH(sta_channel) &&
-			(!cds_is_sta_sap_scc_allowed_on_dfs_channel())) ||
+	bool sta_sap_scc_on_dfs_chan;
+
+	sta_sap_scc_on_dfs_chan = cds_is_sta_sap_scc_allowed_on_dfs_channel();
+	if (CDS_IS_DFS_CH(sta_channel) && sta_sap_scc_on_dfs_chan) {
+		cds_debug("STA, SAP SCC is allowed on DFS chan %u",
+				sta_channel);
+		return true;
+	}
+
+	if (CDS_IS_DFS_CH(sta_channel) ||
 		CDS_IS_PASSIVE_OR_DISABLE_CH(sta_channel) ||
 		!cds_is_safe_channel(sta_channel))
 		if (wma_is_hw_dbs_capable())
@@ -7973,7 +8198,7 @@ static bool cds_valid_sta_channel_check(uint8_t sta_channel)
 void cds_check_concurrent_intf_and_restart_sap(hdd_adapter_t *adapter)
 {
 	hdd_context_t *hdd_ctx;
-	hdd_station_ctx_t *hdd_sta_ctx = WLAN_HDD_GET_STATION_CTX_PTR(adapter);
+	hdd_station_ctx_t *hdd_sta_ctx;
 	bool restart_sap = false;
 	uint8_t sap_ch;
 
@@ -7986,6 +8211,12 @@ void cds_check_concurrent_intf_and_restart_sap(hdd_adapter_t *adapter)
 	/* don't restart sap if driver is loading/unloading/recovering */
 	if (wlan_hdd_validate_context(hdd_ctx))
 		return;
+
+	if (!adapter) {
+		cds_err("HDD adapter is NULL");
+		return;
+	}
+	hdd_sta_ctx = WLAN_HDD_GET_STATION_CTX_PTR(adapter);
 
 	if (cds_get_connection_count() == 1) {
 		/*
@@ -8532,6 +8763,7 @@ void cds_restart_sap(hdd_adapter_t *ap_adapter)
 		hdd_cleanup_actionframe(hdd_ctx, ap_adapter);
 		hostapd_state = WLAN_HDD_GET_HOSTAP_STATE_PTR(ap_adapter);
 		qdf_event_reset(&hostapd_state->qdf_stop_bss_event);
+		hdd_ipa_ap_disconnect(ap_adapter);
 		if (QDF_STATUS_SUCCESS == wlansap_stop_bss(sap_ctx)) {
 			qdf_status =
 				qdf_wait_for_event_completion(&hostapd_state->
@@ -8682,7 +8914,7 @@ QDF_STATUS cds_update_connection_info_utfw(
 	cds_update_conc_list(conn_index,
 			cds_get_mode(type, sub_type),
 			channelid, HW_MODE_20_MHZ,
-			mac_id, chain_mask, 0, vdev_id, true);
+			mac_id, chain_mask, 0, vdev_id, true, true);
 
 	return QDF_STATUS_SUCCESS;
 }
@@ -8696,6 +8928,8 @@ QDF_STATUS cds_incr_connection_count_utfw(
 	uint32_t conn_index = 0;
 	hdd_context_t *hdd_ctx;
 	cds_context_type *cds_ctx;
+	bool update_conn = true;
+	enum cds_con_mode mode;
 
 	hdd_ctx = cds_get_context(QDF_MODULE_ID_HDD);
 	if (!hdd_ctx) {
@@ -8718,10 +8952,15 @@ QDF_STATUS cds_incr_connection_count_utfw(
 	}
 	cds_debug("--> filling entry at index[%d]", conn_index);
 
+	mode = cds_get_mode(type, sub_type);
+	if (mode == CDS_STA_MODE || mode == CDS_P2P_CLIENT_MODE)
+		update_conn = false;
+
 	cds_update_conc_list(conn_index,
-				cds_get_mode(type, sub_type),
+				mode,
 				channelid, HW_MODE_20_MHZ,
-				mac_id, chain_mask, 0, vdev_id, true);
+				mac_id, chain_mask, 0, vdev_id, true,
+				update_conn);
 
 	return QDF_STATUS_SUCCESS;
 }
@@ -9187,6 +9426,23 @@ static enum cds_conc_next_action cds_get_current_pref_hw_mode(void)
 
 }
 
+QDF_STATUS cds_stop_opportunistic_timer(void)
+{
+	p_cds_contextType cds_ctx;
+
+	cds_ctx = cds_get_global_context();
+	if (!cds_ctx) {
+		cds_err("Invalid CDS context");
+		return QDF_STATUS_E_FAILURE;
+	}
+
+	if (cds_ctx->dbs_opportunistic_timer.state != QDF_TIMER_STATE_RUNNING)
+		return QDF_STATUS_SUCCESS;
+
+	qdf_mc_timer_stop(&cds_ctx->dbs_opportunistic_timer);
+	return QDF_STATUS_SUCCESS;
+}
+
 /**
  * cds_restart_opportunistic_timer() - Restarts opportunistic timer
  * @check_state: check timer state if this flag is set, else restart
@@ -9240,7 +9496,8 @@ QDF_STATUS cds_restart_opportunistic_timer(bool check_state)
  * Return: QDF_STATUS
  */
 QDF_STATUS cds_register_sap_restart_channel_switch_cb(
-		void (*sap_restart_chan_switch_cb)(void *, uint32_t, uint32_t))
+		void (*sap_restart_chan_switch_cb)(struct hdd_adapter_s *,
+						   uint32_t, uint32_t))
 {
 	p_cds_contextType cds_ctx;
 
@@ -9498,27 +9755,9 @@ QDF_STATUS cds_get_nss_for_vdev(enum cds_con_mode mode,
 	cds_context_type *cds_ctx;
 	enum tQDF_ADAPTER_MODE dev_mode;
 
-	switch (mode) {
-	case CDS_STA_MODE:
-		dev_mode = QDF_STA_MODE;
-		break;
-	case CDS_SAP_MODE:
-		dev_mode = QDF_SAP_MODE;
-		break;
-	case CDS_P2P_CLIENT_MODE:
-		dev_mode = QDF_P2P_CLIENT_MODE;
-		break;
-	case CDS_P2P_GO_MODE:
-		dev_mode = QDF_P2P_GO_MODE;
-		break;
-	case CDS_IBSS_MODE:
-		dev_mode = QDF_IBSS_MODE;
-		break;
-	default:
-		cds_err("Invalid mode to get allowed NSS value");
+	dev_mode = cds_get_qdf_mode_from_cds(mode);
+	if (dev_mode == QDF_MAX_NO_OF_MODE)
 		return QDF_STATUS_E_FAILURE;
-	};
-
 	hdd_ctx = cds_get_context(QDF_MODULE_ID_HDD);
 	if (!hdd_ctx) {
 		cds_err("HDD context is NULL");
@@ -9754,6 +9993,8 @@ void cds_init_sap_mandatory_2g_chan(void)
 		cds_err("Error in getting valid channels");
 		return;
 	}
+	cds_ctx->sap_mandatory_channels_len = 0;
+
 	for (i = 0; i < len; i++) {
 		if (CDS_IS_CHANNEL_24GHZ(chan_list[i])) {
 			cds_err("Add chan %hu to mandatory list", chan_list[i]);
@@ -9962,6 +10203,7 @@ QDF_STATUS cds_valid_sap_conc_channel_check(uint8_t *con_ch, uint8_t sap_ch)
 {
 	uint8_t channel = *con_ch;
 	uint8_t temp_channel = 0;
+	bool sta_sap_scc_on_dfs_chan;
 	hdd_context_t *hdd_ctx;
 
 	hdd_ctx = cds_get_context(QDF_MODULE_ID_HDD);
@@ -9989,6 +10231,8 @@ QDF_STATUS cds_valid_sap_conc_channel_check(uint8_t *con_ch, uint8_t sap_ch)
 	else if (!channel)
 		channel = sap_ch;
 
+	sta_sap_scc_on_dfs_chan = cds_is_sta_sap_scc_allowed_on_dfs_channel();
+
 	if (cds_valid_sta_channel_check(channel)) {
 		if (CDS_IS_DFS_CH(channel) ||
 			CDS_IS_PASSIVE_OR_DISABLE_CH(channel) ||
@@ -10012,13 +10256,21 @@ QDF_STATUS cds_valid_sap_conc_channel_check(uint8_t *con_ch, uint8_t sap_ch)
 					return QDF_STATUS_E_FAILURE;
 				}
 			} else {
+				if (CDS_IS_DFS_CH(channel) &&
+						sta_sap_scc_on_dfs_chan) {
+					cds_debug("STA, SAP SCC is allowed on DFS chan %u",
+							channel);
+					goto update_chan;
+				}
+
 				cds_warn("Can't have concurrency on %d",
-					channel);
+						channel);
 				return QDF_STATUS_E_FAILURE;
 			}
 		}
 	}
 
+update_chan:
 	if (channel != sap_ch)
 		*con_ch = channel;
 
@@ -10038,7 +10290,9 @@ bool cds_is_force_scc(void)
 	return ((hdd_ctx->config->WlanMccToSccSwitchMode ==
 		QDF_MCC_TO_SCC_SWITCH_FORCE_WITHOUT_DISCONNECTION) ||
 			(hdd_ctx->config->WlanMccToSccSwitchMode ==
-		QDF_MCC_TO_SCC_SWITCH_WITH_FAVORITE_CHANNEL));
+		QDF_MCC_TO_SCC_SWITCH_WITH_FAVORITE_CHANNEL) ||
+			(hdd_ctx->config->WlanMccToSccSwitchMode ==
+		QDF_MCC_TO_SCC_WITH_PREFERRED_BAND));
 }
 /**
  * cds_get_valid_chan_weights() - Get the weightage for all
@@ -10071,21 +10325,6 @@ QDF_STATUS cds_get_valid_chan_weights(struct sir_pcl_chan_weights *weight,
 		return QDF_STATUS_E_FAILURE;
 	}
 
-	if (!weight->pcl_list) {
-		cds_err("Invalid pcl");
-		return QDF_STATUS_E_FAILURE;
-	}
-
-	if (!weight->saved_chan_list) {
-		cds_err("Invalid valid channel list");
-		return QDF_STATUS_E_FAILURE;
-	}
-
-	if (!weight->weighed_valid_list) {
-		cds_err("Invalid weighed valid channel list");
-		return QDF_STATUS_E_FAILURE;
-	}
-
 	qdf_mem_set(weight->weighed_valid_list, QDF_MAX_NUM_CHAN,
 		    WEIGHT_OF_DISALLOWED_CHANNELS);
 	qdf_mutex_acquire(&cds_ctx->qdf_conc_list_lock);
@@ -10100,9 +10339,9 @@ QDF_STATUS cds_get_valid_chan_weights(struct sir_pcl_chan_weights *weight,
 		cds_store_and_del_conn_info(CDS_STA_MODE, false,
 						info, &num_cxn_del);
 		for (i = 0; i < weight->saved_num_chan; i++) {
-			if (cds_allow_concurrency(CDS_STA_MODE,
-						  weight->saved_chan_list[i],
-						  HW_MODE_20_MHZ)) {
+			if (cds_is_concurrency_allowed(CDS_STA_MODE,
+						     weight->saved_chan_list[i],
+						     HW_MODE_20_MHZ)) {
 				weight->weighed_valid_list[i] =
 					WEIGHT_OF_NON_PCL_CHANNELS;
 			}
@@ -10480,6 +10719,8 @@ void cds_checkn_update_hw_mode_single_mac_mode(uint8_t channel)
 		cds_err("Invalid CDS Context");
 		return;
 	}
+	if (QDF_TIMER_STATE_RUNNING == cds_ctx->dbs_opportunistic_timer.state)
+		qdf_mc_timer_stop(&cds_ctx->dbs_opportunistic_timer);
 
 	qdf_mutex_acquire(&cds_ctx->qdf_conc_list_lock);
 	for (i = 0; i < MAX_NUMBER_OF_CONC_CONNECTIONS; i++) {
@@ -10492,11 +10733,6 @@ void cds_checkn_update_hw_mode_single_mac_mode(uint8_t channel)
 			}
 	}
 	qdf_mutex_release(&cds_ctx->qdf_conc_list_lock);
-
-	if (QDF_TIMER_STATE_RUNNING ==
-		cds_ctx->dbs_opportunistic_timer.state)
-		qdf_mc_timer_stop(&cds_ctx->dbs_opportunistic_timer);
-
 	cds_dbs_opportunistic_timer_handler((void *)cds_ctx);
 }
 
@@ -10724,6 +10960,174 @@ bool cds_is_valid_channel_for_channel_switch(uint8_t channel)
 
 	cds_debug("Invalid channel for channel switch");
 	return false;
+}
+
+bool cds_is_sta_connected_in_2g(void)
+{
+	QDF_STATUS status;
+	hdd_adapter_t *hdd_adapter = NULL;
+	hdd_adapter_list_node_t *adapter_node = NULL, *next = NULL;
+	bool ret = false;
+	hdd_station_ctx_t *sta_ctx;
+	hdd_context_t *hdd_ctx;
+
+	hdd_ctx = cds_get_context(QDF_MODULE_ID_HDD);
+	if (!hdd_ctx) {
+		cds_err("HDD context is NULL");
+		return ret;
+	}
+
+	status =  hdd_get_front_adapter(hdd_ctx, &adapter_node);
+
+	/* loop through all adapters and check connection info for
+	 * STA adapters.
+	 */
+	while (NULL != adapter_node && QDF_STATUS_SUCCESS == status) {
+		hdd_adapter = adapter_node->pAdapter;
+		if (QDF_STA_MODE == hdd_adapter->device_mode) {
+			sta_ctx = WLAN_HDD_GET_STATION_CTX_PTR(hdd_adapter);
+			if (eConnectionState_Associated ==
+			    sta_ctx->conn_info.connState &&
+			    sta_ctx->conn_info.operationChannel <=
+			    SIR_11B_CHANNEL_END)
+				return true;
+		}
+		status = hdd_get_next_adapter(hdd_ctx, adapter_node, &next);
+		adapter_node = next;
+	}
+	return ret;
+}
+
+uint32_t cds_get_connection_info(struct connection_info *info)
+{
+	cds_context_type *cds_ctx;
+	uint32_t conn_index, count = 0;
+
+	cds_ctx = cds_get_context(QDF_MODULE_ID_QDF);
+	if (!cds_ctx) {
+		cds_err("Invalid CDS Context");
+		return count;
+	}
+
+	for (conn_index = 0; conn_index < MAX_NUMBER_OF_CONC_CONNECTIONS;
+	     conn_index++) {
+		if (CONC_CONNECTION_LIST_VALID_INDEX(conn_index)) {
+			info[count].vdev_id =
+				       conc_connection_list[conn_index].vdev_id;
+			info[count].mac_id =
+					   conc_connection_list[conn_index].mac;
+			info[count].channel =
+					  conc_connection_list[conn_index].chan;
+			count++;
+		}
+	}
+
+	return count;
+}
+
+void cds_trim_acs_channel_list(tsap_Config_t *sap_cfg)
+{
+	uint32_t list[MAX_NUMBER_OF_CONC_CONNECTIONS];
+	uint32_t index, count, i, ch_list_count;
+	uint8_t band_mask = 0, ch_5g = 0, ch_24g = 0;
+	uint8_t ch_list[QDF_MAX_NUM_CHAN];
+
+	if (sap_cfg->acs_cfg.ch_list_count >= QDF_MAX_NUM_CHAN) {
+		cds_err("acs_cfg.ch_list_count too big %d",
+			sap_cfg->acs_cfg.ch_list_count);
+		return;
+	}
+	/*
+	 * if force SCC is enabled and there is a STA connection, trim the
+	 * ACS channel list on the band on which STA connection is present
+	 */
+	count = cds_mode_specific_connection_count(CDS_STA_MODE, list);
+	if (cds_is_force_scc() && count) {
+		index = 0;
+		while (index < count) {
+			if (CDS_IS_CHANNEL_24GHZ(
+				conc_connection_list[list[index]].chan) &&
+				cds_is_safe_channel(
+				conc_connection_list[list[index]].chan)) {
+				band_mask |= 1;
+				ch_24g = conc_connection_list[list[index]].chan;
+			}
+			if (CDS_IS_CHANNEL_5GHZ(
+				conc_connection_list[list[index]].chan) &&
+				cds_is_safe_channel(
+				conc_connection_list[list[index]].chan) &&
+				!CDS_IS_DFS_CH(
+				conc_connection_list[list[index]].chan) &&
+				!CDS_IS_PASSIVE_OR_DISABLE_CH(
+				conc_connection_list[list[index]].chan)) {
+				band_mask |= 2;
+				ch_5g = conc_connection_list[list[index]].chan;
+			}
+			index++;
+		}
+		ch_list_count = 0;
+		if (band_mask == 1) {
+			ch_list[ch_list_count++] = ch_24g;
+			for (i = 0; i < sap_cfg->acs_cfg.ch_list_count; i++) {
+				if (CDS_IS_CHANNEL_24GHZ(
+					sap_cfg->acs_cfg.ch_list[i]))
+					continue;
+				ch_list[ch_list_count++] =
+					sap_cfg->acs_cfg.ch_list[i];
+			}
+		} else if (band_mask == 2) {
+			ch_list[ch_list_count++] = ch_5g;
+			for (i = 0; i < sap_cfg->acs_cfg.ch_list_count; i++) {
+				if (CDS_IS_CHANNEL_5GHZ(
+					sap_cfg->acs_cfg.ch_list[i]))
+					continue;
+				ch_list[ch_list_count++] =
+					sap_cfg->acs_cfg.ch_list[i];
+			}
+		} else if (band_mask == 3) {
+			ch_list[ch_list_count++] = ch_24g;
+			ch_list[ch_list_count++] = ch_5g;
+		} else {
+			cds_debug("unexpected band_mask value %d", band_mask);
+			return;
+		}
+
+		sap_cfg->acs_cfg.ch_list_count = ch_list_count;
+		for (i = 0; i < sap_cfg->acs_cfg.ch_list_count; i++)
+			sap_cfg->acs_cfg.ch_list[i] = ch_list[i];
+	}
+}
+
+bool cds_is_sta_sap_scc(uint8_t sap_ch)
+{
+	uint32_t conn_index;
+	cds_context_type *cds_ctx;
+	bool is_scc = false;
+
+	cds_ctx = cds_get_context(QDF_MODULE_ID_QDF);
+	if (!cds_ctx) {
+		cds_err("Invalid CDS Context");
+		return is_scc;
+	}
+
+	if (!cds_mode_specific_connection_count(CDS_STA_MODE, NULL)) {
+		cds_debug("There is no STA+SAP conc");
+		return is_scc;
+	}
+
+	qdf_mutex_acquire(&cds_ctx->qdf_conc_list_lock);
+	for (conn_index = 0; conn_index < MAX_NUMBER_OF_CONC_CONNECTIONS;
+		 conn_index++) {
+		if (conc_connection_list[conn_index].in_use &&
+			(conc_connection_list[conn_index].mode == CDS_STA_MODE) &&
+			(sap_ch == conc_connection_list[conn_index].chan)) {
+			is_scc = true;
+			break;
+		}
+	}
+	qdf_mutex_release(&cds_ctx->qdf_conc_list_lock);
+
+	return is_scc;
 }
 
 #ifdef FEATURE_WLAN_WAPI

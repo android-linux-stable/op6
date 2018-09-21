@@ -1,8 +1,5 @@
 /*
- * Copyright (c) 2014-2017 The Linux Foundation. All rights reserved.
- *
- * Previously licensed under the ISC license by Qualcomm Atheros, Inc.
- *
+ * Copyright (c) 2014-2018 The Linux Foundation. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -17,12 +14,6 @@
  * PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER
  * TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR
  * PERFORMANCE OF THIS SOFTWARE.
- */
-
-/*
- * This file was originally distributed by Qualcomm Atheros, Inc.
- * under proprietary terms before Copyright ownership was assigned
- * to the Linux Foundation.
  */
 
 /*========================================================================
@@ -54,7 +45,7 @@
 static int epping_start_adapter(epping_adapter_t *pAdapter);
 static void epping_stop_adapter(epping_adapter_t *pAdapter);
 
-static void epping_timer_expire(void *data)
+static void epping_timer_expire(unsigned long data)
 {
 	struct net_device *dev = (struct net_device *)data;
 	epping_adapter_t *pAdapter;
@@ -144,7 +135,8 @@ end:
 
 }
 
-static int epping_hard_start_xmit(struct sk_buff *skb, struct net_device *dev)
+static netdev_tx_t epping_hard_start_xmit(struct sk_buff *skb,
+					  struct net_device *dev)
 {
 	epping_adapter_t *pAdapter;
 	int ret = 0;
@@ -153,12 +145,13 @@ static int epping_hard_start_xmit(struct sk_buff *skb, struct net_device *dev)
 	if (NULL == pAdapter) {
 		EPPING_LOG(QDF_TRACE_LEVEL_FATAL,
 			   "%s: EPPING adapter context is Null", __func__);
+		kfree_skb(skb);
 		ret = -ENODEV;
 		goto end;
 	}
 	ret = epping_tx_send(skb, pAdapter);
 end:
-	return ret;
+	return NETDEV_TX_OK;
 }
 
 static struct net_device_stats *epping_get_stats(struct net_device *dev)

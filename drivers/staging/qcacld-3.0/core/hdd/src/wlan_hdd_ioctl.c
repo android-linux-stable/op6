@@ -1,9 +1,6 @@
 /*
  * Copyright (c) 2012-2018 The Linux Foundation. All rights reserved.
  *
- * Previously licensed under the ISC license by Qualcomm Atheros, Inc.
- *
- *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
  * above copyright notice and this permission notice appear in all
@@ -19,12 +16,6 @@
  * PERFORMANCE OF THIS SOFTWARE.
  */
 
-/*
- * This file was originally distributed by Qualcomm Atheros, Inc.
- * under proprietary terms before Copyright ownership was assigned
- * to the Linux Foundation.
- */
-
 /* Include Files */
 
 #include <wlan_hdd_includes.h>
@@ -32,6 +23,7 @@
 #include "wlan_hdd_trace.h"
 #include "wlan_hdd_ioctl.h"
 #include "wlan_hdd_power.h"
+#include "wlan_hdd_request_manager.h"
 #include "wlan_hdd_driver_ops.h"
 #include "cds_concurrency.h"
 #include "wlan_hdd_hostapd.h"
@@ -88,6 +80,16 @@
  * we will split the printing.
  */
 #define NUM_OF_STA_DATA_TO_PRINT 16
+
+#ifdef WLAN_FEATURE_EXTWOW_SUPPORT
+/**
+ * struct enable_ext_wow_priv - Private data structure for ext wow
+ * @ext_wow_should_suspend: Suspend status of ext wow
+ */
+struct enable_ext_wow_priv {
+	bool ext_wow_should_suspend;
+};
+#endif
 
 /*
  * Android DRIVER command structures
@@ -512,8 +514,9 @@ static QDF_STATUS
 hdd_parse_get_ibss_peer_info(uint8_t *pValue, struct qdf_mac_addr *pPeerMacAddr)
 {
 	uint8_t *inPtr = pValue;
+	size_t in_ptr_len = strlen(pValue);
 
-	inPtr = strnchr(pValue, strlen(pValue), SPACE_ASCII_VALUE);
+	inPtr = strnchr(pValue, in_ptr_len, SPACE_ASCII_VALUE);
 
 	if (NULL == inPtr)
 		return QDF_STATUS_E_FAILURE;
@@ -526,10 +529,14 @@ hdd_parse_get_ibss_peer_info(uint8_t *pValue, struct qdf_mac_addr *pPeerMacAddr)
 	if ('\0' == *inPtr)
 		return QDF_STATUS_E_FAILURE;
 
-	if (inPtr[2] != ':' || inPtr[5] != ':' || inPtr[8] != ':' ||
-	    inPtr[11] != ':' || inPtr[14] != ':') {
+	in_ptr_len -= (inPtr - pValue);
+	if (in_ptr_len < 17)
 		return QDF_STATUS_E_FAILURE;
-	}
+
+	if (inPtr[2] != ':' || inPtr[5] != ':' || inPtr[8] != ':' ||
+	    inPtr[11] != ':' || inPtr[14] != ':')
+		return QDF_STATUS_E_FAILURE;
+
 	sscanf(inPtr, "%2x:%2x:%2x:%2x:%2x:%2x",
 	       (unsigned int *)&pPeerMacAddr->bytes[0],
 	       (unsigned int *)&pPeerMacAddr->bytes[1],
@@ -796,59 +803,21 @@ static int hdd_parse_reassoc_command_v1_data(const uint8_t *pValue,
 }
 
 #ifdef WLAN_FEATURE_ROAM_OFFLOAD
-void hdd_wma_send_fastreassoc_cmd(hdd_adapter_t *adapter,
+QDF_STATUS hdd_wma_send_fastreassoc_cmd(hdd_adapter_t *adapter,
 				const tSirMacAddr bssid, int channel)
 {
-	QDF_STATUS status;
 	hdd_wext_state_t *wext_state = WLAN_HDD_GET_WEXT_STATE_PTR(adapter);
 	hdd_station_ctx_t *hdd_sta_ctx = WLAN_HDD_GET_STATION_CTX_PTR(adapter);
+
 	tCsrRoamProfile *profile = &wext_state->roamProfile;
-	tSirMacAddr connected_bssid = {0};
-	struct wma_roam_invoke_cmd *fastreassoc;
-	cds_msg_t msg = {0};
+	tSirMacAddr connected_bssid;
 
-	fastreassoc = qdf_mem_malloc(sizeof(*fastreassoc));
-	if (NULL == fastreassoc) {
-		hdd_err("qdf_mem_malloc failed for fastreassoc");
-		return;
-	}
-	if (hdd_sta_ctx) {
-		qdf_mem_copy(connected_bssid,
-			     hdd_sta_ctx->conn_info.bssId.bytes, ETH_ALEN);
-		/* if both are same then set the flag */
-		if (!qdf_mem_cmp(connected_bssid, bssid, ETH_ALEN)) {
-			fastreassoc->is_same_bssid = true;
-			hdd_debug("bssid same, bssid[%pM]", bssid);
-		}
-	}
-	fastreassoc->vdev_id = adapter->sessionId;
-	fastreassoc->bssid[0] = bssid[0];
-	fastreassoc->bssid[1] = bssid[1];
-	fastreassoc->bssid[2] = bssid[2];
-	fastreassoc->bssid[3] = bssid[3];
-	fastreassoc->bssid[4] = bssid[4];
-	fastreassoc->bssid[5] = bssid[5];
-
-	status = sme_get_beacon_frm(WLAN_HDD_GET_HAL_CTX(adapter), profile,
-						bssid, &fastreassoc->frame_buf,
-						&fastreassoc->frame_len,
-						&channel);
-
-	fastreassoc->channel = channel;
-	if (QDF_STATUS_SUCCESS != status) {
-		hdd_warn("sme_get_beacon_frm failed");
-		fastreassoc->frame_buf = NULL;
-		fastreassoc->frame_len = 0;
-	}
-
-	msg.type = SIR_HAL_ROAM_INVOKE;
-	msg.reserved = 0;
-	msg.bodyptr = fastreassoc;
-	status = cds_mq_post_message(QDF_MODULE_ID_WMA, &msg);
-	if (QDF_STATUS_SUCCESS != status) {
-		hdd_err("Not able to post ROAM_INVOKE_CMD message to WMA");
-		qdf_mem_free(fastreassoc);
-	}
+	qdf_mem_copy(connected_bssid, hdd_sta_ctx->conn_info.bssId.bytes,
+		     ETH_ALEN);
+	return sme_fast_reassoc(WLAN_HDD_GET_HAL_CTX(adapter),
+				profile, bssid, channel,
+				adapter->sessionId,
+				connected_bssid);
 }
 #endif
 
@@ -911,8 +880,10 @@ int hdd_reassoc(hdd_adapter_t *adapter, const uint8_t *bssid,
 
 	/* Proceed with reassoc */
 	if (roaming_offload_enabled(hdd_ctx)) {
-		hdd_wma_send_fastreassoc_cmd(adapter,
-					bssid, (int)channel);
+		if (QDF_STATUS_SUCCESS !=
+		    hdd_wma_send_fastreassoc_cmd(adapter, bssid,
+						 (int)channel))
+		    ret = -EINVAL;
 	} else {
 		tCsrHandoffRequest handoffInfo;
 
@@ -1927,16 +1898,28 @@ static QDF_STATUS hdd_parse_plm_cmd(uint8_t *pValue, tSirPlmReq *pPlmRequest)
 #endif
 
 #ifdef WLAN_FEATURE_EXTWOW_SUPPORT
-static void wlan_hdd_ready_to_extwow(void *callbackContext, bool is_success)
+/**
+ * wlan_hdd_ready_to_extwow() - Callback function for enable ext wow
+ * @cookie: callback context
+ * @is_success: suspend status of ext wow
+ *
+ * Return: none
+ */
+static void wlan_hdd_ready_to_extwow(void *cookie, bool is_success)
 {
-	hdd_context_t *hdd_ctx = (hdd_context_t *) callbackContext;
-	int rc;
+	struct hdd_request *request = NULL;
+	struct enable_ext_wow_priv *priv = NULL;
 
-	rc = wlan_hdd_validate_context(hdd_ctx);
-	if (rc)
+	request = hdd_request_get(cookie);
+	if (!request) {
+		hdd_err("Obselete request");
 		return;
-	hdd_ctx->ext_wow_should_suspend = is_success;
-	complete(&hdd_ctx->ready_to_extwow);
+	}
+	priv = hdd_request_priv(request);
+	priv->ext_wow_should_suspend = is_success;
+
+	hdd_request_complete(request);
+	hdd_request_put(request);
 }
 
 static int hdd_enable_ext_wow(hdd_adapter_t *adapter,
@@ -1946,31 +1929,46 @@ static int hdd_enable_ext_wow(hdd_adapter_t *adapter,
 	QDF_STATUS qdf_ret_status;
 	hdd_context_t *hdd_ctx = WLAN_HDD_GET_CTX(adapter);
 	tHalHandle hHal = WLAN_HDD_GET_HAL_CTX(adapter);
-	int rc;
+	int rc = 0;
+	struct enable_ext_wow_priv *priv = NULL;
+	struct hdd_request *request = NULL;
+	void *cookie = NULL;
+	struct hdd_request_params hdd_params = {
+		.priv_size = sizeof(*priv),
+		.timeout_ms = WLAN_WAIT_TIME_READY_TO_EXTWOW,
+	};
 
 	qdf_mem_copy(&params, arg_params, sizeof(params));
 
-	INIT_COMPLETION(hdd_ctx->ready_to_extwow);
+	request = hdd_request_alloc(&hdd_params);
+	if (!request) {
+		hdd_err("Request Allocation Failure");
+		return -ENOMEM;
+	}
+	cookie = hdd_request_cookie(request);
 
 	qdf_ret_status = sme_configure_ext_wow(hHal, &params,
-						&wlan_hdd_ready_to_extwow,
-						hdd_ctx);
+					       &wlan_hdd_ready_to_extwow,
+					       cookie);
 	if (QDF_STATUS_SUCCESS != qdf_ret_status) {
 		hdd_err("sme_configure_ext_wow returned failure %d",
-			 qdf_ret_status);
-		return -EPERM;
+			qdf_ret_status);
+		rc = -EPERM;
+		goto exit;
 	}
 
-	rc = wait_for_completion_timeout(&hdd_ctx->ready_to_extwow,
-			msecs_to_jiffies(WLAN_WAIT_TIME_READY_TO_EXTWOW));
-	if (!rc) {
+	rc = hdd_request_wait_for_response(request);
+	if (rc) {
 		hdd_err("Failed to get ready to extwow");
-		return -EPERM;
+		rc = -EPERM;
+		goto exit;
 	}
 
-	if (!hdd_ctx->ext_wow_should_suspend) {
+	priv = hdd_request_priv(request);
+	if (!priv->ext_wow_should_suspend) {
 		hdd_err("Received ready to ExtWoW failure");
-		return -EPERM;
+		rc = -EPERM;
+		goto exit;
 	}
 
 	if (hdd_ctx->config->extWowGotoSuspend) {
@@ -1982,8 +1980,8 @@ static int hdd_enable_ext_wow(hdd_adapter_t *adapter,
 		rc = wlan_hdd_cfg80211_suspend_wlan(hdd_ctx->wiphy, NULL);
 		if (rc < 0) {
 			hdd_err("wlan_hdd_cfg80211_suspend_wlan failed, error = %d",
-				 rc);
-			return rc;
+				rc);
+			goto exit;
 		}
 
 		rc = wlan_hdd_bus_suspend(state);
@@ -1991,11 +1989,12 @@ static int hdd_enable_ext_wow(hdd_adapter_t *adapter,
 			hdd_err("wlan_hdd_bus_suspend failed, status = %d",
 				rc);
 			wlan_hdd_cfg80211_resume_wlan(hdd_ctx->wiphy);
-			return rc;
+			goto exit;
 		}
 	}
-
-	return 0;
+exit:
+	hdd_request_put(request);
+	return rc;
 }
 
 static int hdd_enable_ext_wow_parser(hdd_adapter_t *adapter, int vdev_id,
@@ -2522,46 +2521,25 @@ sme_config_free:
 }
 #endif
 
+struct link_status_priv {
+	uint8_t link_status;
+};
+
 static void hdd_get_link_status_cb(uint8_t status, void *context)
 {
-	struct statsContext *pLinkContext;
-	hdd_adapter_t *adapter;
+	struct hdd_request *request;
+	struct link_status_priv *priv;
 
-	if (NULL == context) {
-		hdd_err("Bad context [%pK]", context);
+	request = hdd_request_get(context);
+	if (!request) {
+		hdd_err("Obsolete request");
 		return;
 	}
 
-	pLinkContext = context;
-	adapter = pLinkContext->pAdapter;
-
-	spin_lock(&hdd_context_lock);
-
-	if ((NULL == adapter) ||
-	    (LINK_STATUS_MAGIC != pLinkContext->magic)) {
-		/*
-		 * the caller presumably timed out so there is
-		 * nothing we can do
-		 */
-		spin_unlock(&hdd_context_lock);
-		hdd_warn("Invalid context, adapter [%pK] magic [%08x]",
-			  adapter, pLinkContext->magic);
-		return;
-	}
-
-	/* context is valid so caller is still waiting */
-
-	/* paranoia: invalidate the magic */
-	pLinkContext->magic = 0;
-
-	/* copy over the status */
-	adapter->linkStatus = status;
-
-	/* notify the caller */
-	complete(&pLinkContext->completion);
-
-	/* serialization is complete */
-	spin_unlock(&hdd_context_lock);
+	priv = hdd_request_priv(request);
+	priv->link_status = status;
+	hdd_request_complete(request);
+	hdd_request_put(request);
 }
 
 /**
@@ -2581,9 +2559,15 @@ static int wlan_hdd_get_link_status(hdd_adapter_t *adapter)
 
 	hdd_station_ctx_t *pHddStaCtx =
 				WLAN_HDD_GET_STATION_CTX_PTR(adapter);
-	static struct statsContext context;
 	QDF_STATUS hstatus;
-	unsigned long rc;
+	int ret;
+	void *cookie;
+	struct hdd_request *request;
+	struct link_status_priv *priv;
+	static const struct hdd_request_params params = {
+		.priv_size = sizeof(*priv),
+		.timeout_ms = WLAN_WAIT_TIME_LINK_STATUS,
+	};
 
 	if (cds_is_driver_recovering() || cds_is_driver_in_bad_state()) {
 		hdd_warn("Recovery in Progress. State: 0x%x Ignore!!!",
@@ -2608,26 +2592,38 @@ static int wlan_hdd_get_link_status(hdd_adapter_t *adapter)
 		return 0;
 	}
 
-	init_completion(&context.completion);
-	context.pAdapter = adapter;
-	context.magic = LINK_STATUS_MAGIC;
+	request = hdd_request_alloc(&params);
+	if (!request) {
+		hdd_err("Request allocation failure");
+		return 0;
+	}
+	cookie = hdd_request_cookie(request);
+
 	hstatus = sme_get_link_status(WLAN_HDD_GET_HAL_CTX(adapter),
 				      hdd_get_link_status_cb,
-				      &context, adapter->sessionId);
+				      cookie, adapter->sessionId);
 	if (QDF_STATUS_SUCCESS != hstatus) {
 		hdd_err("Unable to retrieve link status");
 		/* return a cached value */
 	} else {
 		/* request is sent -- wait for the response */
-		rc = wait_for_completion_timeout(&context.completion,
-				msecs_to_jiffies(WLAN_WAIT_TIME_LINK_STATUS));
-		if (!rc)
+		ret = hdd_request_wait_for_response(request);
+		if (ret) {
 			hdd_err("SME timed out while retrieving link status");
+			/* return a cached value */
+		} else {
+			/* update the adapter with the fresh results */
+			priv = hdd_request_priv(request);
+			adapter->linkStatus = priv->link_status;
+		}
 	}
 
-	spin_lock(&hdd_context_lock);
-	context.magic = 0;
-	spin_unlock(&hdd_context_lock);
+	/*
+	 * either we never sent a request, we sent a request and
+	 * received a response or we sent a request and timed out.
+	 * regardless we are done with the request.
+	 */
+	hdd_request_put(request);
 
 	/* either callback updated adapter stats or it has cached data */
 	return adapter->linkStatus;
@@ -3027,25 +3023,23 @@ static int drv_cmd_p2p_dev_addr(hdd_adapter_t *adapter,
 				uint8_t command_len,
 				hdd_priv_data_t *priv_data)
 {
-	int ret = 0;
+	struct qdf_mac_addr *addr = &hdd_ctx->p2pDeviceAddress;
+	size_t user_size = QDF_MIN(sizeof(addr->bytes), priv_data->total_len);
 
 	MTRACE(qdf_trace(QDF_MODULE_ID_HDD,
 			 TRACE_CODE_HDD_P2P_DEV_ADDR_IOCTL,
 			 adapter->sessionId,
-			(unsigned int)(*(hdd_ctx->p2pDeviceAddress.bytes + 2)
-				<< 24 | *(hdd_ctx->p2pDeviceAddress.bytes
-				+ 3) << 16 | *(hdd_ctx->
-				p2pDeviceAddress.bytes + 4) << 8 |
-				*(hdd_ctx->p2pDeviceAddress.bytes +
-				5))));
+			 (unsigned int)(*(addr->bytes + 2) << 24 |
+				*(addr->bytes + 3) << 16 |
+				*(addr->bytes + 4) << 8 |
+				*(addr->bytes + 5))));
 
-	if (copy_to_user(priv_data->buf, hdd_ctx->p2pDeviceAddress.bytes,
-			 sizeof(tSirMacAddr))) {
+	if (copy_to_user(priv_data->buf, addr->bytes, user_size)) {
 		hdd_err("failed to copy data to user buffer");
-		ret = -EFAULT;
+		return -EFAULT;
 	}
 
-	return ret;
+	return 0;
 }
 
 /**
@@ -3139,7 +3133,26 @@ static int drv_cmd_country(hdd_adapter_t *adapter,
 	char *country_code;
 	int32_t cc_from_db;
 
-	country_code = command + 8;
+	country_code = strnchr(command, strlen(command), ' ');
+	/* no argument after the command*/
+	if (!country_code)
+		return -EINVAL;
+
+	/* no space after the command*/
+	if (SPACE_ASCII_VALUE != *country_code)
+		return -EINVAL;
+
+	country_code++;
+
+	/* removing empty spaces*/
+	while ((SPACE_ASCII_VALUE  == *country_code) &&
+		   ('\0' !=  *country_code))
+		country_code++;
+
+	/* no or less than 2  arguments followed by spaces*/
+	if (*country_code == '\0' || *(country_code + 1) == '\0')
+		return -EINVAL;
+
 	if (!((country_code[0] == 'X' && country_code[1] == 'X') ||
 	    (country_code[0] == '0' && country_code[1] == '0'))) {
 		cc_from_db = cds_get_country_from_alpha2(country_code);
@@ -3441,11 +3454,6 @@ static int drv_cmd_set_roam_mode(hdd_adapter_t *adapter,
 	int ret = 0;
 	uint8_t *value = command;
 	uint8_t roamMode = CFG_LFR_FEATURE_ENABLED_DEFAULT;
-
-	if (!adapter->fast_roaming_allowed) {
-		hdd_err("Roaming is always disabled on this interface");
-		goto exit;
-	}
 
 	/* Move pointer to ahead of SETROAMMODE<delimiter> */
 	value = value + SIZE_OF_SETROAMMODE + 1;
@@ -4484,11 +4492,6 @@ static int drv_cmd_set_fast_roam(hdd_adapter_t *adapter,
 	uint8_t *value = command;
 	uint8_t lfrMode = CFG_LFR_FEATURE_ENABLED_DEFAULT;
 
-	if (!adapter->fast_roaming_allowed) {
-		hdd_err("Roaming is always disabled on this interface");
-		goto exit;
-	}
-
 	/* Move pointer to ahead of SETFASTROAM<delimiter> */
 	value = value + command_len + 1;
 
@@ -5229,13 +5232,16 @@ static int drv_cmd_get_ibss_peer_info_all(hdd_adapter_t *adapter,
 	/* Handle the command */
 	status = hdd_cfg80211_get_ibss_peer_info_all(adapter);
 	if (QDF_STATUS_SUCCESS == status) {
+		size_t user_size = QDF_MIN(WLAN_MAX_BUF_SIZE,
+					   priv_data->total_len);
+
 		/*
 		 * The variable extra needed to be allocated on the heap since
 		 * amount of memory required to copy the data for 32 devices
 		 * exceeds the size of 1024 bytes of default stack size. On
 		 * 64 bit devices, the default max stack size of 2048 bytes
 		 */
-		extra = qdf_mem_malloc(WLAN_MAX_BUF_SIZE);
+		extra = qdf_mem_malloc(user_size);
 
 		if (NULL == extra) {
 			hdd_err("memory allocation failed");
@@ -5244,7 +5250,7 @@ static int drv_cmd_get_ibss_peer_info_all(hdd_adapter_t *adapter,
 		}
 
 		/* Copy number of stations */
-		length = scnprintf(extra, WLAN_MAX_BUF_SIZE, "%d ",
+		length = scnprintf(extra, user_size, "%d ",
 				   pHddStaCtx->ibss_peer_info.numPeers);
 		numOfBytestoPrint = length;
 		for (idx = 0; idx < pHddStaCtx->ibss_peer_info.numPeers;
@@ -5267,8 +5273,8 @@ static int drv_cmd_get_ibss_peer_info_all(hdd_adapter_t *adapter,
 			rssi = pHddStaCtx->ibss_peer_info.peerInfoParams[idx].
 									rssi;
 
-			length += scnprintf((extra + length),
-				WLAN_MAX_BUF_SIZE - length,
+			length += scnprintf(extra + length,
+				user_size - length,
 				"%02x:%02x:%02x:%02x:%02x:%02x %d %d ",
 				mac_addr[0], mac_addr[1], mac_addr[2],
 				mac_addr[3], mac_addr[4], mac_addr[5],
@@ -5404,7 +5410,7 @@ static int drv_cmd_get_ibss_peer_info(hdd_adapter_t *adapter,
 	}
 
 	/* Success ! */
-	hdd_debug("%s", priv_data->buf);
+	hdd_debug("%s", extra);
 	ret = 0;
 
 exit:
@@ -5843,12 +5849,6 @@ static int drv_cmd_set_ccx_mode(hdd_adapter_t *adapter,
 	    pmkid_modes.fw_okc &&
 	    sme_get_is_ft_feature_enabled(hdd_ctx->hHal)) {
 		hdd_warn("OKC/ESE/11R are supported simultaneously hence this operation is not permitted!");
-		ret = -EPERM;
-		goto exit;
-	}
-
-	if (!adapter->fast_roaming_allowed) {
-		hdd_warn("Fast roaming is not allowed on this device hence this operation is not permitted!");
 		ret = -EPERM;
 		goto exit;
 	}
@@ -6657,45 +6657,49 @@ QDF_STATUS hdd_update_smps_antenna_mode(hdd_context_t *hdd_ctx, int mode)
 }
 
 /**
- * drv_cmd_set_antenna_mode() - SET ANTENNA MODE driver command
- * handler
- * @adapter: Pointer to network adapter
- * @hdd_ctx: Pointer to hdd context
- * @command: Pointer to input command
- * @command_len: Command length
- * @priv_data: Pointer to private data in command
+ * wlan_hdd_soc_set_antenna_mode_cb() - Callback for set dual
+ * mac scan config
+ * @status: Status of set antenna mode
+ * @context: callback context
+ *
+ * Callback on setting the dual mac configuration
+ *
+ * Return: None
  */
-static int drv_cmd_set_antenna_mode(hdd_adapter_t *adapter,
-				hdd_context_t *hdd_ctx,
-				uint8_t *command,
-				uint8_t command_len,
-				hdd_priv_data_t *priv_data)
+static void
+wlan_hdd_soc_set_antenna_mode_cb(enum set_antenna_mode_status status,
+				 void *context)
 {
+	struct hdd_request *request = NULL;
+
+	hdd_debug("Status: %d", status);
+
+	request = hdd_request_get(context);
+	if (!request) {
+		hdd_err("obsolete request");
+		return;
+	}
+
+	/* Signal the completion of set dual mac config */
+	hdd_request_complete(request);
+	hdd_request_put(request);
+}
+
+int hdd_set_antenna_mode(hdd_adapter_t *adapter,
+				  hdd_context_t *hdd_ctx, int mode)
+{
+
 	struct sir_antenna_mode_param params;
 	QDF_STATUS status;
 	int ret = 0;
-	int mode;
-	uint8_t *value = command;
-
-	if (((1 << QDF_STA_MODE) != hdd_ctx->concurrency_mode) ||
-	    (hdd_ctx->no_of_active_sessions[QDF_STA_MODE] > 1)) {
-		hdd_err("Operation invalid in non sta or concurrent mode");
-		ret = -EPERM;
-		goto exit;
-	}
-
-	mode = hdd_parse_setantennamode_command(value);
-	if (mode < 0) {
-		hdd_err("Invalid SETANTENNA command");
-		ret = mode;
-		goto exit;
-	}
-
-	hdd_debug("Processing antenna mode switch to: %d", mode);
+	struct hdd_request *request = NULL;
+	static const struct hdd_request_params request_params = {
+		.priv_size = 0,
+		.timeout_ms = WLAN_WAIT_TIME_ANTENNA_MODE_REQ,
+	};
 
 	if (hdd_ctx->current_antenna_mode == mode) {
 		hdd_err("System already in the requested mode");
-		ret = 0;
 		goto exit;
 	}
 
@@ -6709,7 +6713,6 @@ static int drv_cmd_set_antenna_mode(hdd_adapter_t *adapter,
 	if ((HDD_ANTENNA_MODE_1X1 == mode) &&
 	    hdd_is_supported_chain_mask_1x1(hdd_ctx)) {
 		hdd_err("System only supports 1x1 mode");
-		ret = 0;
 		goto exit;
 	}
 
@@ -6737,36 +6740,40 @@ static int drv_cmd_set_antenna_mode(hdd_adapter_t *adapter,
 			goto exit;
 	}
 
-	params.set_antenna_mode_resp =
-	    (void *)wlan_hdd_soc_set_antenna_mode_cb;
+	request = hdd_request_alloc(&request_params);
+	if (!request) {
+		hdd_err("Request Allocation Failure");
+		ret = -ENOMEM;
+		goto exit;
+	}
+
+	params.set_antenna_mode_ctx = hdd_request_cookie(request);
+	params.set_antenna_mode_resp = wlan_hdd_soc_set_antenna_mode_cb;
 	hdd_debug("Set antenna mode rx chains: %d tx chains: %d",
 		 params.num_rx_chains,
 		 params.num_tx_chains);
 
-
-	INIT_COMPLETION(hdd_ctx->set_antenna_mode_cmpl);
 	status = sme_soc_set_antenna_mode(hdd_ctx->hHal, &params);
-	if (QDF_STATUS_SUCCESS != status) {
+	if (QDF_IS_STATUS_ERROR(status)) {
 		hdd_err("set antenna mode failed status : %d", status);
 		ret = -EFAULT;
-		goto exit;
+		goto request_put;
 	}
 
-	ret = wait_for_completion_timeout(
-		&hdd_ctx->set_antenna_mode_cmpl,
-		msecs_to_jiffies(WLAN_WAIT_TIME_ANTENNA_MODE_REQ));
-	if (!ret) {
-		ret = -EFAULT;
+	ret = hdd_request_wait_for_response(request);
+	if (ret) {
 		hdd_err("send set antenna mode timed out");
-		goto exit;
+		goto request_put;
 	}
 
 	status = hdd_update_smps_antenna_mode(hdd_ctx, mode);
 	if (QDF_STATUS_SUCCESS != status) {
 		ret = -EFAULT;
-		goto exit;
+		goto request_put;
 	}
 	ret = 0;
+request_put:
+	hdd_request_put(request);
 exit:
 #ifdef FEATURE_WLAN_TDLS
 	/* Reset tdls NSS flags */
@@ -6781,8 +6788,36 @@ exit:
 #endif
 	hdd_debug("Set antenna status: %d current mode: %d",
 		 ret, hdd_ctx->current_antenna_mode);
-	return ret;
 
+	return ret;
+}
+/**
+ * drv_cmd_set_antenna_mode() - SET ANTENNA MODE driver command
+ * handler
+ * @adapter: Pointer to network adapter
+ * @hdd_ctx: Pointer to hdd context
+ * @command: Pointer to input command
+ * @command_len: Command length
+ * @priv_data: Pointer to private data in command
+ */
+static int drv_cmd_set_antenna_mode(hdd_adapter_t *adapter,
+				hdd_context_t *hdd_ctx,
+				uint8_t *command,
+				uint8_t command_len,
+				hdd_priv_data_t *priv_data)
+{
+	int mode;
+	uint8_t *value = command;
+
+	mode = hdd_parse_setantennamode_command(value);
+	if (mode < 0) {
+		hdd_err("Invalid SETANTENNA command");
+		return mode;
+	}
+
+	hdd_debug("Processing antenna mode switch to: %d", mode);
+
+	return hdd_set_antenna_mode(adapter, hdd_ctx, mode);
 }
 
 /**
@@ -7025,6 +7060,377 @@ static int drv_cmd_set_channel_switch(hdd_adapter_t *adapter,
 	return 0;
 }
 
+void wlan_hdd_free_cache_channels(hdd_context_t *hdd_ctx)
+{
+	ENTER();
+
+	if (!hdd_ctx->original_channels)
+		return;
+
+	qdf_mutex_acquire(&hdd_ctx->cache_channel_lock);
+	hdd_ctx->original_channels->num_channels = 0;
+	qdf_mem_free(hdd_ctx->original_channels->channel_info);
+	hdd_ctx->original_channels->channel_info = NULL;
+	qdf_mem_free(hdd_ctx->original_channels);
+	hdd_ctx->original_channels = NULL;
+	qdf_mutex_release(&hdd_ctx->cache_channel_lock);
+
+	EXIT();
+}
+
+/**
+ * hdd_alloc_chan_cache() - Allocate the memory to cache the channel
+ * info for the channels received in command SET_DISABLE_CHANNEL_LIST
+ * @hdd_ctx: Pointer to HDD context
+ * @num_chan: Number of channels for which memory needs to
+ * be allocated
+ *
+ * Return: 0 on success and error code on failure
+ */
+static int hdd_alloc_chan_cache(hdd_context_t *hdd_ctx, int num_chan)
+{
+	hdd_ctx->original_channels =
+			qdf_mem_malloc(sizeof(struct hdd_cache_channels));
+	if (!hdd_ctx->original_channels) {
+		hdd_err("QDF_MALLOC_ERR");
+		return -ENOMEM;
+	}
+	hdd_ctx->original_channels->num_channels = num_chan;
+	hdd_ctx->original_channels->channel_info =
+					qdf_mem_malloc(num_chan *
+					sizeof(struct hdd_cache_channel_info));
+	if (!hdd_ctx->original_channels->channel_info) {
+		hdd_err("QDF_MALLOC_ERR");
+		hdd_ctx->original_channels->num_channels = 0;
+		qdf_mem_free(hdd_ctx->original_channels);
+		hdd_ctx->original_channels = NULL;
+		return -ENOMEM;
+	}
+	return 0;
+}
+
+/**
+ * check_disable_channels() - Check for disable channel
+ * @hdd_ctx: Pointer to hdd context
+ * @operating_channel: Current operating channel of adapter
+ *
+ * This function checks original_channels array for a specific channel
+ *
+ * Return: 0 if channel not found, 1 if channel found
+ */
+static bool check_disable_channels(hdd_context_t *hdd_ctx,
+				   uint8_t operating_channel)
+{
+	uint32_t num_channels;
+	uint8_t i;
+
+	if (!hdd_ctx || !hdd_ctx->original_channels ||
+	    !hdd_ctx->original_channels->channel_info)
+		return false;
+
+	num_channels = hdd_ctx->original_channels->num_channels;
+	for (i = 0; i < num_channels; i++)
+		if (hdd_ctx->original_channels->channel_info[i].channel_num ==
+				operating_channel)
+			return true;
+	return false;
+}
+
+/**
+ * disconnect_sta_and_stop_sap() - Disconnect STA and stop SAP
+ *
+ * @hdd_ctx: Pointer to hdd context
+ *
+ * Disable channels provided by user and disconnect STA if it is
+ * connected to any AP, stop SAP and send deauthentication request
+ * to STAs connected to SAP.
+ *
+ * Return: None
+ */
+static void disconnect_sta_and_stop_sap(hdd_context_t *hdd_ctx)
+{
+	hdd_adapter_list_node_t *adapter_node = NULL, *next = NULL;
+	hdd_adapter_t *adapter;
+	QDF_STATUS status;
+
+	if (!hdd_ctx)
+		return;
+
+	wlan_hdd_disable_channels(hdd_ctx);
+
+	status = hdd_get_front_adapter(hdd_ctx, &adapter_node);
+	while (adapter_node && (status == QDF_STATUS_SUCCESS)) {
+		adapter = adapter_node->pAdapter;
+
+		if (!hdd_validate_adapter(adapter) &&
+		    (adapter->device_mode == QDF_SAP_MODE) &&
+		    (check_disable_channels(hdd_ctx,
+		     adapter->sessionCtx.ap.operatingChannel)))
+			wlan_hdd_stop_sap(adapter);
+
+		status = hdd_get_next_adapter(hdd_ctx, adapter_node, &next);
+		adapter_node = next;
+	}
+}
+
+/**
+ * hdd_parse_disable_chan_cmd() - Parse the channel list received
+ * in command.
+ * @adapter: pointer to hdd adapter
+ * @ptr: Pointer to the command string
+ *
+ * This function parses the channel list received in the command.
+ * command should be a string having format
+ * SET_DISABLE_CHANNEL_LIST <num of channels>
+ * <channels separated by spaces>.
+ * If the command comes multiple times than this function will compare
+ * the channels received in the command with the channles cached in the
+ * first command, if the channel list matches with the cached channles,
+ * it returns success otherwise returns failure.
+ *
+ * Return: 0 on success, Error code on failure
+ */
+
+static int hdd_parse_disable_chan_cmd(hdd_adapter_t *adapter, uint8_t *ptr)
+{
+	hdd_context_t *hdd_ctx = WLAN_HDD_GET_CTX(adapter);
+	uint8_t *param;
+	int j, i, temp_int, ret = 0, num_channels;
+	int parsed_channels[MAX_CHANNEL];
+	bool is_command_repeated = false;
+
+	if (NULL == hdd_ctx) {
+		hdd_err("HDD Context is NULL");
+		return -EINVAL;
+	}
+
+	param = strnchr(ptr, strlen(ptr), ' ');
+	/*no argument after the command*/
+	if (NULL == param)
+		return -EINVAL;
+
+	/*no space after the command*/
+	else if (SPACE_ASCII_VALUE != *param)
+		return -EINVAL;
+
+	param++;
+
+	/*removing empty spaces*/
+	while ((SPACE_ASCII_VALUE  == *param) && ('\0' !=  *param))
+		param++;
+
+	/*no argument followed by spaces*/
+	if ('\0' == *param)
+		return -EINVAL;
+
+	/*getting the first argument ie the number of channels*/
+	if (sscanf(param, "%d ", &temp_int) != 1) {
+		hdd_err("Cannot get number of channels from input");
+		return -EINVAL;
+	}
+
+	if (temp_int < 0 || temp_int > MAX_CHANNEL) {
+		hdd_err("Invalid Number of channel received");
+		return -EINVAL;
+	}
+
+	hdd_debug("Number of channel to disable are: %d", temp_int);
+
+	if (!temp_int) {
+		if (!wlan_hdd_restore_channels(hdd_ctx)) {
+			/*
+			 * Free the cache channels only when the command is
+			 * received with num channels as 0
+			 */
+			wlan_hdd_free_cache_channels(hdd_ctx);
+		}
+		return 0;
+	}
+
+	qdf_mutex_acquire(&hdd_ctx->cache_channel_lock);
+
+	if (!hdd_ctx->original_channels) {
+		if (hdd_alloc_chan_cache(hdd_ctx, temp_int)) {
+			ret = -ENOMEM;
+			goto mem_alloc_failed;
+		}
+	} else if (hdd_ctx->original_channels->num_channels != temp_int) {
+		hdd_err("Invalid Number of channels");
+		ret = -EINVAL;
+		is_command_repeated = true;
+		goto parse_failed;
+	} else {
+		is_command_repeated = true;
+	}
+	num_channels = temp_int;
+	for (j = 0; j < num_channels; j++) {
+		/*
+		 * param pointing to the beginning of first space
+		 * after number of channels
+		 */
+		param = strpbrk(param, " ");
+		/*no channel list after the number of channels argument*/
+		if (NULL == param) {
+			hdd_err("Invalid No of channel provided in the list");
+			ret = -EINVAL;
+			goto parse_failed;
+		}
+
+		param++;
+
+		/*removing empty space*/
+		while ((SPACE_ASCII_VALUE == *param) && ('\0' != *param))
+			param++;
+
+		if ('\0' == *param) {
+			hdd_err("No channel is provided in the list");
+			ret = -EINVAL;
+			goto parse_failed;
+		}
+
+		if (sscanf(param, "%d ", &temp_int) != 1) {
+			hdd_err("Cannot read channel number");
+			ret = -EINVAL;
+			goto parse_failed;
+		}
+
+		if (!IS_CHANNEL_VALID(temp_int)) {
+			hdd_err("Invalid channel number received");
+			ret = -EINVAL;
+			goto parse_failed;
+		}
+
+		hdd_debug("channel[%d] = %d", j, temp_int);
+		parsed_channels[j] = temp_int;
+	}
+
+	/*extra arguments check*/
+	param = strpbrk(param, " ");
+	if (NULL != param) {
+		while ((SPACE_ASCII_VALUE == *param) && ('\0' != *param))
+			param++;
+
+		if ('\0' !=  *param) {
+			hdd_err("Invalid argument received");
+			ret = -EINVAL;
+			goto parse_failed;
+		}
+	}
+
+	/*
+	 * If command is received first time, cache the channels to
+	 * be disabled else compare the channels received in the
+	 * command with the cached channels, if channel list matches
+	 * return success otherewise return failure.
+	 */
+	if (!is_command_repeated)
+		for (j = 0; j < num_channels; j++)
+			hdd_ctx->original_channels->
+					channel_info[j].channel_num =
+							parsed_channels[j];
+	else {
+		for (i = 0; i < num_channels; i++) {
+			for (j = 0; j < num_channels; j++)
+				if (hdd_ctx->original_channels->
+					channel_info[i].channel_num ==
+							parsed_channels[j])
+					break;
+			if (j == num_channels) {
+				ret = -EINVAL;
+				goto parse_failed;
+			}
+		}
+		ret = 0;
+	}
+
+	if (!is_command_repeated && hdd_ctx->config->disable_channel)
+		disconnect_sta_and_stop_sap(hdd_ctx);
+mem_alloc_failed:
+
+	qdf_mutex_release(&hdd_ctx->cache_channel_lock);
+	EXIT();
+
+	return ret;
+
+parse_failed:
+	qdf_mutex_release(&hdd_ctx->cache_channel_lock);
+	if (!is_command_repeated)
+		wlan_hdd_free_cache_channels(hdd_ctx);
+	EXIT();
+
+	return ret;
+}
+
+static int drv_cmd_set_disable_chan_list(hdd_adapter_t *adapter,
+					 hdd_context_t *hdd_ctx,
+					 uint8_t *command,
+					 uint8_t command_len,
+					 hdd_priv_data_t *priv_data)
+{
+	return hdd_parse_disable_chan_cmd(adapter, command);
+}
+
+/**
+ * hdd_get_disable_ch_list() - get disable channel list
+ * @hdd_ctx: hdd context
+ * @buf: buffer to hold disable channel list
+ * @buf_len: buffer length
+ *
+ * Return: length of data copied to buf
+ */
+static int hdd_get_disable_ch_list(hdd_context_t *hdd_ctx, uint8_t *buf,
+				   uint32_t buf_len)
+{
+	struct hdd_cache_channel_info *ch_list;
+	unsigned char i, num_ch;
+	int len = 0;
+
+	qdf_mutex_acquire(&hdd_ctx->cache_channel_lock);
+	if (hdd_ctx->original_channels &&
+	    hdd_ctx->original_channels->num_channels &&
+	    hdd_ctx->original_channels->channel_info) {
+		num_ch = hdd_ctx->original_channels->num_channels;
+
+		len = scnprintf(buf, buf_len, "%s %hhu",
+				"GET_DISABLE_CHANNEL_LIST", num_ch);
+		ch_list = hdd_ctx->original_channels->channel_info;
+		for (i = 0; (i < num_ch) && len <= buf_len; i++) {
+			len += scnprintf(buf + len, buf_len - len,
+					 " %d", ch_list[i].channel_num);
+		}
+	}
+	qdf_mutex_release(&hdd_ctx->cache_channel_lock);
+
+	return len;
+}
+
+static int drv_cmd_get_disable_chan_list(hdd_adapter_t *adapter,
+					 hdd_context_t *hdd_ctx,
+					 uint8_t *command,
+					 uint8_t command_len,
+					 hdd_priv_data_t *priv_data)
+{
+	char extra[512] = {0};
+	int max_len, copied_length;
+
+	hdd_debug("Received Command to get disable Channels list");
+
+	max_len = QDF_MIN(priv_data->total_len, sizeof(extra));
+	copied_length = hdd_get_disable_ch_list(hdd_ctx, extra, max_len);
+	if (copied_length == 0) {
+		hdd_err("disable channel list is not yet programmed");
+		return -EINVAL;
+	}
+
+	if (copy_to_user(priv_data->buf, &extra, copied_length + 1)) {
+		hdd_err("failed to copy data to user buffer");
+		return -EFAULT;
+	}
+
+	hdd_debug("data:%s", extra);
+	return 0;
+}
+
 /*
  * The following table contains all supported WLAN HDD
  * IOCTL driver commands and the handler for each of them.
@@ -7136,6 +7542,8 @@ static const struct hdd_drv_cmd hdd_drv_cmds[] = {
 	{"CHANNEL_SWITCH",            drv_cmd_set_channel_switch, true},
 	{"SETANTENNAMODE",            drv_cmd_set_antenna_mode, true},
 	{"GETANTENNAMODE",            drv_cmd_get_antenna_mode, false},
+	{"SET_DISABLE_CHANNEL_LIST",  drv_cmd_set_disable_chan_list, true},
+	{"GET_DISABLE_CHANNEL_LIST",  drv_cmd_get_disable_chan_list, false},
 	/* Deprecated commands */
 	{"STOP",                      drv_cmd_dummy, false},
 	{"RXFILTER-START",            drv_cmd_dummy, false},
@@ -7381,7 +7789,7 @@ static int __hdd_ioctl(struct net_device *dev, struct ifreq *ifr, int cmd)
 
 	switch (cmd) {
 	case (SIOCDEVPRIVATE + 1):
-		if (is_compat_task())
+		if (in_compat_syscall())
 			ret = hdd_driver_compat_ioctl(adapter, ifr);
 		else
 			ret = hdd_driver_ioctl(adapter, ifr);

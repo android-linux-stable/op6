@@ -1,8 +1,5 @@
 /*
- * Copyright (c) 2013-2017 The Linux Foundation. All rights reserved.
- *
- * Previously licensed under the ISC license by Qualcomm Atheros, Inc.
- *
+ * Copyright (c) 2013-2018 The Linux Foundation. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -19,14 +16,10 @@
  * PERFORMANCE OF THIS SOFTWARE.
  */
 
-/*
- * This file was originally distributed by Qualcomm Atheros, Inc.
- * under proprietary terms before Copyright ownership was assigned
- * to the Linux Foundation.
- */
-
 #ifndef WMA_TGT_CFG_H
 #define WMA_TGT_CFG_H
+
+#include "wma_sar_public_structs.h"
 
 /**
  * struct wma_tgt_services - target services
@@ -73,6 +66,7 @@ struct wma_tgt_services {
 	bool get_peer_info_enabled;
 	bool is_fils_roaming_supported;
 	bool is_fw_mawc_capable;
+	bool is_11k_offload_supported;
 };
 
 /**
@@ -140,6 +134,26 @@ struct wma_dfs_radar_ind {
 };
 
 /**
+ * struct board_info - Structure for board related information
+ * @bdf_version: board file version
+ * @ref_design_id: reference design id
+ * @customer_id: customer id
+ * @project_id: project id
+ * @board_data_rev: board data revision
+ *
+ * This board information will be stored in board file during the
+ * calibration and customization.
+ *
+ */
+struct board_info {
+	uint32_t bdf_version;
+	uint32_t ref_design_id;
+	uint32_t customer_id;
+	uint32_t project_id;
+	uint32_t board_data_rev;
+};
+
+/**
  * struct wma_tgt_cfg - target config
  * @target_fw_version: target fw version
  * @target_fw_vers_ext: target fw extended sub version
@@ -157,6 +171,7 @@ struct wma_dfs_radar_ind {
  * @bool is_ra_rate_limit_enabled: RA filter support
  * @tx_bfee_8ss_enabled: Tx Beamformee support for 8x8
  * @rcpi_enabled: for checking rcpi support
+ * @sar_version: Version of SAR supported by firmware
  */
 struct wma_tgt_cfg {
 	uint32_t target_fw_version;
@@ -177,7 +192,7 @@ struct wma_tgt_cfg {
 	bool egap_support;
 #endif
 	uint32_t fine_time_measurement_cap;
-	bool bpf_enabled;
+	bool apf_enabled;
 #ifdef FEATURE_WLAN_RA_FILTERING
 	bool is_ra_rate_limit_enabled;
 #endif
@@ -188,5 +203,8 @@ struct wma_tgt_cfg {
 	uint16_t wmi_max_len;
 	bool tx_bfee_8ss_enabled;
 	bool rcpi_enabled;
+	uint32_t hw_bd_id;
+	struct board_info hw_bd_info;
+	enum sar_version sar_version;
 };
 #endif /* WMA_TGT_CFG_H */

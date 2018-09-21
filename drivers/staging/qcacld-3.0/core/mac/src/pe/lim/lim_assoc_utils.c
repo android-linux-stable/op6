@@ -1,9 +1,6 @@
 /*
  * Copyright (c) 2011-2018 The Linux Foundation. All rights reserved.
  *
- * Previously licensed under the ISC license by Qualcomm Atheros, Inc.
- *
- *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
  * above copyright notice and this permission notice appear in all
@@ -17,12 +14,6 @@
  * PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER
  * TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR
  * PERFORMANCE OF THIS SOFTWARE.
- */
-
-/*
- * This file was originally distributed by Qualcomm Atheros, Inc.
- * under proprietary terms before Copyright ownership was assigned
- * to the Linux Foundation.
  */
 
 /*
@@ -349,8 +340,8 @@ static inline bool is_non_rsn_cipher(uint8_t cipher_suite)
  * frame handling to determine whether received RSN in
  * Assoc/Reassoc request frames include supported cipher suites or not.
  *
- * Return: eSIR_SUCCESS if ALL BSS basic rates are present in the
- *                  received rateset else failure status.
+ * Return: eSIR_SUCCESS if ALL supported cipher suites are present in the
+ *                  received rsn IE else failure status.
  */
 
 uint8_t
@@ -461,8 +452,8 @@ lim_check_rx_rsn_ie_match(tpAniSirGlobal mac_ctx, tDot11fIERSN rx_rsn_ie,
  * frame handling to determine whether received RSN in
  * Assoc/Reassoc request frames include supported cipher suites or not.
  *
- * Return: Success if ALL BSS basic rates are present in the
- *                  received rateset else failure status.
+ * Return: Success if ALL supported cipher suites are present in the
+ *                  received wpa IE else failure status.
  */
 
 uint8_t

@@ -1,8 +1,5 @@
 /*
- * Copyright (c) 2011-2017 The Linux Foundation. All rights reserved.
- *
- * Previously licensed under the ISC license by Qualcomm Atheros, Inc.
- *
+ * Copyright (c) 2011-2018 The Linux Foundation. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -17,12 +14,6 @@
  * PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER
  * TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR
  * PERFORMANCE OF THIS SOFTWARE.
- */
-
-/*
- * This file was originally distributed by Qualcomm Atheros, Inc.
- * under proprietary terms before Copyright ownership was assigned
- * to the Linux Foundation.
  */
 
 /**
@@ -346,6 +337,20 @@ static inline QDF_STATUS csr_roam_offload_scan(tpAniSirGlobal pMac,
 }
 #endif
 
+/**
+ * csr_get_roam_enabled_sta_sessionid() - get the session id of the sta on which
+ * roaming is enabled.
+ * @mac_ctx:  pointer to global mac structure
+ *
+ * The function check if any sta is present and has roaming enabled and return
+ * the session id of the sta with roaming enabled else if roaming is not enabled
+ * on any STA return CSR_SESSION_ID_INVALID
+ *
+ * Return: session id of STA on which roaming is enabled
+ */
+uint8_t csr_get_roam_enabled_sta_sessionid(
+	tpAniSirGlobal mac_ctx);
+
 #if defined(WLAN_FEATURE_FILS_SK)
 /**
  * csr_update_fils_config - Update FILS config to CSR roam session
@@ -413,5 +418,19 @@ static inline void csr_neighbor_roam_send_lfr_metric_event(
 QDF_STATUS csr_roam_stop_wait_for_key_timer(tpAniSirGlobal pMac);
 QDF_STATUS csr_roam_copy_connected_profile(tpAniSirGlobal pMac,
 		uint32_t sessionId, tCsrRoamProfile *pDstProfile);
+
+/**
+ * csr_invoke_neighbor_report_request - Send neighbor report invoke command to
+ *					WMA
+ * @mac_ctx: MAC context
+ * @session_id: session id
+ *
+ * API called from IW to invoke neighbor report request to WMA then to FW
+ *
+ * Return: QDF_STATUS
+ */
+QDF_STATUS csr_invoke_neighbor_report_request(uint8_t session_id,
+				struct sRrmNeighborReq *neighbor_report_req,
+				bool send_resp_to_host);
 
 #endif /* CSR_NEIGHBOR_ROAM_H */

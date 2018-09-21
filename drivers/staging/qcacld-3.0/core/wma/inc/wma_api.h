@@ -1,9 +1,6 @@
 /*
  * Copyright (c) 2012-2018 The Linux Foundation. All rights reserved.
  *
- * Previously licensed under the ISC license by Qualcomm Atheros, Inc.
- *
- *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
  * above copyright notice and this permission notice appear in all
@@ -17,12 +14,6 @@
  * PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER
  * TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR
  * PERFORMANCE OF THIS SOFTWARE.
- */
-
-/*
- * This file was originally distributed by Qualcomm Atheros, Inc.
- * under proprietary terms before Copyright ownership was assigned
- * to the Linux Foundation.
  */
 
 #ifndef WMA_API_H
@@ -74,6 +65,10 @@ enum GEN_PARAM {
  * @vht_5g: entire VHT cap for 5G band in terms of 32 bit flag
  * @he_2g: entire HE cap for 2G band in terms of 32 bit flag
  * @he_5g: entire HE cap for 5G band in terms of 32 bit flag
+ * @tx_chain_mask_2G: tx chain mask for 2g
+ * @rx_chain_mask_2G: rx chain mask for 2g
+ * @tx_chain_mask_5G: tx chain mask for 5g
+ * @rx_chain_mask_5G: rx chain mask for 5g
  */
 struct wma_caps_per_phy {
 	uint32_t ht_2g;
@@ -82,6 +77,10 @@ struct wma_caps_per_phy {
 	uint32_t vht_5g;
 	uint32_t he_2g;
 	uint32_t he_5g;
+	uint32_t tx_chain_mask_2G;
+	uint32_t rx_chain_mask_2G;
+	uint32_t tx_chain_mask_5G;
+	uint32_t rx_chain_mask_5G;
 };
 
 
@@ -252,7 +251,8 @@ QDF_STATUS wma_get_updated_fw_mode_config(uint32_t *fw_mode_config,
 		bool dbs,
 		bool agile_dfs);
 QDF_STATUS wma_get_updated_scan_and_fw_mode_config(uint32_t *scan_config,
-		uint32_t *fw_mode_config, uint32_t dual_mac_disable_ini);
+		uint32_t *fw_mode_config, uint32_t dual_mac_disable_ini,
+		uint32_t channel_select_logic_conc);
 bool wma_get_dbs_scan_config(void);
 bool wma_get_dbs_plus_agile_scan_config(void);
 bool wma_get_single_mac_scan_with_dfs_config(void);
@@ -382,6 +382,27 @@ QDF_STATUS wma_set_cts2self_for_p2p_go(void *wma_handle,
 QDF_STATUS wma_set_tx_rx_aggregation_size
 	(struct sir_set_tx_rx_aggregation_size *tx_rx_aggregation_size);
 
+/**
+ * wma_set_tx_rx_aggregation_size_per_ac() - set aggregation size per ac
+ * @tx_rx_aggregation_size: the parameter for aggregation size
+ *
+ *  This function try to set the aggregation size per AC.
+ *
+ *  Return: QDF_STATUS enumeration
+ */
+QDF_STATUS wma_set_tx_rx_aggregation_size_per_ac
+	(struct sir_set_tx_rx_aggregation_size *tx_rx_aggregation_size);
+/**
+ * wma_set_sw_retry_threshold() - set sw retry threshold per AC for tx
+ * @tx_rx_aggregation_size: value needs to set to firmware
+ *
+ * This function sends WMI command to set the sw retry threshold per AC
+ * for Tx.
+ *
+ * Return: QDF_STATUS.
+ */
+QDF_STATUS wma_set_sw_retry_threshold
+	(struct sir_set_tx_aggr_sw_retry_threshold *tx_rx_aggregation_size);
 /**
  * wma_get_sar_limit() - get SAR limits from the target
  * @handle: wma handle
@@ -526,4 +547,40 @@ QDF_STATUS wma_wow_set_wake_time(WMA_HANDLE wma_handle, uint8_t vdev_id,
  */
 void wma_wmi_stop(void);
 
+/**
+ * wma_dual_beacon_on_single_mac_scc_capable() - get capability that whether
+ * Support dual beacon on same channel on single MAC
+ *
+ *  Return: bool: capable
+ */
+bool wma_dual_beacon_on_single_mac_scc_capable(void);
+
+/**
+ * wma_dual_beacon_on_single_mac_mcc_capable() - get capability that whether
+ * Support dual beacon on different channel on single MAC
+ *
+ *  Return: bool: capable
+ */
+bool wma_dual_beacon_on_single_mac_mcc_capable(void);
+
+/**
+ * wma_cleanup_vdev_resp_and_hold_req() - cleaunup the vdev resp and hold req
+ * queue
+ * @priv : WMA handle
+ *
+ * Return: None
+ */
+void wma_cleanup_vdev_resp_and_hold_req(void *priv);
+
+/**
+ * wma_send_dhcp_ind() - Send DHCP Start/Stop Indication to FW.
+ * @type - WMA message type.
+ * @device_mode - mode(AP, SAP etc) of the device.
+ * @mac_addr - MAC address of the adapter.
+ * @sta_mac_addr - MAC address of the peer station.
+ *
+ * Return: QDF_STATUS.
+ */
+QDF_STATUS wma_send_dhcp_ind(uint16_t type, uint8_t device_mode,
+			     uint8_t *mac_addr, uint8_t *sta_mac_addr);
 #endif

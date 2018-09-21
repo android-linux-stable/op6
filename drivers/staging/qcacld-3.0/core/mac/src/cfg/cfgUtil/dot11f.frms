@@ -1,8 +1,5 @@
 /*
- * Copyright (c) 2006-2007, 2014-2017 The Linux Foundation. All rights reserved.
- *
- * Previously licensed under the ISC license by Qualcomm Atheros, Inc.
- *
+ * Copyright (c) 2006-2007, 2014-2018 The Linux Foundation. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -17,12 +14,6 @@
  * PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER
  * TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR
  * PERFORMANCE OF THIS SOFTWARE.
- */
-
-/*
- * This file was originally distributed by Qualcomm Atheros, Inc.
- * under proprietary terms before Copyright ownership was assigned
- * to the Linux Foundation.
  */
 
 /**
@@ -1385,8 +1376,8 @@ IE RSN (EID_RSN)                          // 7.3.2.25
 {
     // The version is 2 octets, and we only support version 1.
     version, 2 MUSTBE 1;
-    // The next four octets will be the Group Cipher Suite
-    gp_cipher_suite[4];
+    // The next four octets will be the Optional Group Cipher Suite
+    OPTIONAL gp_cipher_suite[4];
     // The IE *may* stop here; if there's any more, we should see two more
     // octets giving the number of Pairwise Cipher Suites
     OPTIONAL pwise_cipher_suite_count, 2;
@@ -1395,10 +1386,10 @@ IE RSN (EID_RSN)                          // 7.3.2.25
     // to 61.  However, that seems needlessly wasteful of space.
     pwise_cipher_suites[4][0..6] COUNTIS pwise_cipher_suite_count;
     // Optional count of AKM suite selectors
-    OPTIONAL akm_suite_count, 2;
+    OPTIONAL akm_suite_cnt, 2;
     // Again, I see nothing in the Standard explicitly limiting the number of
     // AKM suite selectors other than the maximum size of an IE.
-    akm_suites[4][0..6] COUNTIS akm_suite_count;
+    akm_suite[4][0..6] COUNTIS akm_suite_cnt;
     OPTIONAL RSN_Cap[2];
     // Finally, the IE may contain zero or more PMKIDs:
     OPTIONAL pmkid_count, 2;
@@ -1597,6 +1588,23 @@ IE BeaconReportFrmBody (EID_BCN_REPORT_FRAME_BODY)
      reportedFields[0..224];
 }
 
+const EID_BCN_REPORT_FRAME_BODY_FRAGMENT_ID = 2;
+IE beacon_report_frm_body_fragment_id (EID_BCN_REPORT_FRAME_BODY_FRAGMENT_ID)
+{
+    // Data
+    {
+        beacon_report_id:    8;
+        fragment_id_number:  7;
+        more_fragments:      1;
+    }
+}
+
+const EID_BCN_REPORT_LAST_BEACON_REPORT_INDICATION = 164;
+IE last_beacon_report_indication (EID_BCN_REPORT_LAST_BEACON_REPORT_INDICATION)
+{
+    last_fragment, 1;
+}
+
 IE MeasurementReport (EID_MEAS_REPORT)    // 7.3.2.22
 {
     token, 1;
@@ -1663,6 +1671,8 @@ IE MeasurementReport (EID_MEAS_REPORT)    // 7.3.2.22
            antenna_id,               1;
            parent_TSF,              4;
            OPTIE BeaconReportFrmBody;
+           OPTIE beacon_report_frm_body_fragment_id;
+           OPTIE last_beacon_report_indication;
            //IE vendor_specific
      }
     };
@@ -2570,7 +2580,7 @@ IE fils_indication (EID_FILS_INDICATION)
        reserved                       : 4;
    }
    // other FILS elements
-   variable_data[3..255];
+   variable_data[2..255];
 }
 
 IE fils_assoc_delay_info (EID_EXTN_ID_ELEMENT) OUI ( 0x01 )
@@ -2620,6 +2630,12 @@ IE fils_nonce (EID_EXTN_ID_ELEMENT) OUI ( 0x0D )
 IE fragment_ie (EID_FRAGMENT_IE)
 {
     data[0..255];
+}
+
+IE dh_parameter_element (EID_EXTN_ID_ELEMENT) OUI ( 0x20 )
+{
+    group[2];
+    public_key[0..255];
 }
 
 const EID_RRM_BEACON_REPORTING     = 1;
@@ -2749,6 +2765,7 @@ IE MeasurementRequest (EID_MEAS_REQUEST)  // 7.3.2.21
           OPTIE BcnReportingDetail;
           OPTIE RequestedInfo;
           OPTIE APChannelReport[0..2];
+          OPTIE last_beacon_report_indication;
           //OPTIONAL vendor_specific[1..239];
        }
        lci (measurement_type IS 8)
@@ -3371,6 +3388,7 @@ FRAME AssocRequest                        // 7.2.3.4
     OPTIE  fils_key_confirmation;
     OPTIE  fils_hlp_container;
     OPTIE  fragment_ie;
+    OPTIE  dh_parameter_element;
     OPTIE  WPAOpaque;
     OPTIE  WMMCaps;
     OPTIE  WMMInfoStation;

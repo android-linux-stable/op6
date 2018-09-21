@@ -1,9 +1,6 @@
 /*
  * Copyright (c) 2014-2018 The Linux Foundation. All rights reserved.
  *
- * Previously licensed under the ISC license by Qualcomm Atheros, Inc.
- *
- *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
  * above copyright notice and this permission notice appear in all
@@ -17,12 +14,6 @@
  * PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER
  * TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR
  * PERFORMANCE OF THIS SOFTWARE.
- */
-
-/*
- * This file was originally distributed by Qualcomm Atheros, Inc.
- * under proprietary terms before Copyright ownership was assigned
- * to the Linux Foundation.
  */
 
 /**
@@ -45,7 +36,6 @@
 #include <qdf_mem.h>
 #include <linux/tcp.h>
 #include <qdf_util.h>
-#include <qdf_nbuf.h>
 
 /*
  * Use socket buffer as the underlying implentation as skbuf .
@@ -1520,42 +1510,6 @@ static inline void __qdf_nbuf_init(__qdf_nbuf_t nbuf)
 	qdf_nbuf_users_set(&nbuf->users, 1);
 	nbuf->data = nbuf->head + NET_SKB_PAD;
 	skb_reset_tail_pointer(nbuf);
-}
-
-/**
- * __qdf_nbuf_set_rx_info() - set rx info
- * @nbuf: sk buffer
- * @info: rx info
- * @len: length
- *
- * Return: none
- */
-static inline void
-__qdf_nbuf_set_rx_info(__qdf_nbuf_t nbuf, void *info, uint32_t len)
-{
-	/* Customer may have skb->cb size increased, e.g. to 96 bytes,
-	 * then len's large enough to save the rs status info struct
-	 */
-	uint8_t offset = sizeof(struct qdf_nbuf_cb);
-	uint32_t max = sizeof(((struct sk_buff *)0)->cb)-offset;
-
-	len = (len > max ? max : len);
-
-	memcpy(((uint8_t *)(nbuf->cb) + offset), info, len);
-}
-
-/**
- * __qdf_nbuf_get_rx_info() - get rx info
- * @nbuf: sk buffer
- *
- * Return: rx_info
- */
-static inline void *
-__qdf_nbuf_get_rx_info(__qdf_nbuf_t nbuf)
-{
-	uint8_t offset = sizeof(struct qdf_nbuf_cb);
-
-	return (void *)((uint8_t *)(nbuf->cb) + offset);
 }
 
 /*

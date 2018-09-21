@@ -1,9 +1,6 @@
 /*
  * Copyright (c) 2015-2018 The Linux Foundation. All rights reserved.
  *
- * Previously licensed under the ISC license by Qualcomm Atheros, Inc.
- *
- *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
  * above copyright notice and this permission notice appear in all
@@ -17,12 +14,6 @@
  * PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER
  * TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR
  * PERFORMANCE OF THIS SOFTWARE.
- */
-
-/*
- * This file was originally distributed by Qualcomm Atheros, Inc.
- * under proprietary terms before Copyright ownership was assigned
- * to the Linux Foundation.
  */
 
 /*
@@ -1292,6 +1283,9 @@ QDF_STATUS wmi_unified_cmd_send(wmi_unified_t wmi_handle, wmi_buf_t buf,
 	QDF_STATUS status;
 	uint16_t htc_tag = 0;
 
+	if (wmi_handle->is_target_ready && !wmi_handle->is_target_ready())
+		return QDF_STATUS_E_FAILURE;
+
 	if (wmi_get_runtime_pm_inprogress(wmi_handle)) {
 		htc_tag =
 			(A_UINT16)wmi_handle->ops->wmi_set_htc_tx_tag(
@@ -1716,14 +1710,14 @@ end:
 static inline void wmi_workqueue_watchdog_warn(uint32_t msg_type_id)
 {
 	QDF_TRACE(QDF_MODULE_ID_QDF, QDF_TRACE_LEVEL_ERROR,
-		  "%s: Message type %x has exceeded its alloted time of %ds",
+		  "%s: WLAN_BUG_RCA: Message type %x has exceeded its alloted time of %ds",
 		  __func__, msg_type_id, WMI_WQ_WD_TIMEOUT / 1000);
 }
 
 #ifdef CONFIG_SLUB_DEBUG_ON
-static void wmi_workqueue_watchdog_bite(void *arg)
+static void wmi_workqueue_watchdog_bite(unsigned long arg)
 {
-	struct wmi_wq_dbg_info *info = arg;
+	struct wmi_wq_dbg_info *info = (struct wmi_wq_dbg_info *)arg;
 
 	wmi_workqueue_watchdog_warn(info->wd_msg_type_id);
 	qdf_print_thread_trace(info->task);
@@ -1733,9 +1727,9 @@ static void wmi_workqueue_watchdog_bite(void *arg)
 	QDF_BUG(0);
 }
 #else
-static inline void wmi_workqueue_watchdog_bite(void *arg)
+static inline void wmi_workqueue_watchdog_bite(unsigned long arg)
 {
-	struct wmi_wq_dbg_info *info = arg;
+	struct wmi_wq_dbg_info *info = (struct wmi_wq_dbg_info *)arg;
 
 	wmi_workqueue_watchdog_warn(info->wd_msg_type_id);
 }
@@ -2136,6 +2130,11 @@ wmi_stop(wmi_unified_t wmi_handle)
 		  "WMI Stop\n");
 	wmi_handle->wmi_stopinprogress = 1;
 	return 0;
+}
+
+void wmi_register_tgt_ready_cb(wmi_unified_t wmi_handle, bool (*cb)(void))
+{
+	wmi_handle->is_target_ready = cb;
 }
 
 #ifdef WMI_NON_TLV_SUPPORT

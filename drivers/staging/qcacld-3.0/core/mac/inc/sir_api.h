@@ -1,9 +1,6 @@
 /*
  * Copyright (c) 2012-2018 The Linux Foundation. All rights reserved.
  *
- * Previously licensed under the ISC license by Qualcomm Atheros, Inc.
- *
- *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
  * above copyright notice and this permission notice appear in all
@@ -17,12 +14,6 @@
  * PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER
  * TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR
  * PERFORMANCE OF THIS SOFTWARE.
- */
-
-/*
- * This file was originally distributed by Qualcomm Atheros, Inc.
- * under proprietary terms before Copyright ownership was assigned
- * to the Linux Foundation.
  */
 
 /*
@@ -142,6 +133,7 @@ typedef uint8_t tSirVersionString[SIR_VERSION_STRING_LEN];
 /* Maximum peer station number query one time */
 #define MAX_PEER_STA 12
 
+#define SIR_NAN_CH_INFO_MAX_CHANNELS 4
 /**
  * enum sir_conn_update_reason: Reason for conc connection update
  * @SIR_UPDATE_REASON_SET_OPER_CHAN: Set probable operating channel
@@ -218,6 +210,18 @@ typedef enum {
 #define SIR_UAPSD_GET(ac, mask)      (((mask) & (SIR_UAPSD_FLAG_ ## ac)) >> SIR_UAPSD_BITOFFSET_ ## ac)
 
 #endif
+
+/* RSN capabilities structure */
+
+struct rsn_caps {
+	uint16_t PreAuthSupported:1;
+	uint16_t NoPairwise:1;
+	uint16_t PTKSAReplayCounter:2;
+	uint16_t GTKSAReplayCounter:2;
+	uint16_t MFPRequired:1;
+	uint16_t MFPCapable:1;
+	uint16_t Reserved:8;
+};
 
 /**
  * enum sir_roam_op_code - Operation to be done by the callback.
@@ -435,6 +439,26 @@ typedef enum eSirRFBand {
 	SIR_BAND_MAX = SIR_BAND_UNKNOWN,
 } tSirRFBand;
 
+/**
+ * enum set_hw_mode_status - Status of set HW mode command
+ * @SET_HW_MODE_STATUS_OK: command successful
+ * @SET_HW_MODE_STATUS_EINVAL: Requested invalid hw_mode
+ * @SET_HW_MODE_STATUS_ECANCELED: HW mode change cancelled
+ * @SET_HW_MODE_STATUS_ENOTSUP: HW mode not supported
+ * @SET_HW_MODE_STATUS_EHARDWARE: HW mode change prevented by hardware
+ * @SET_HW_MODE_STATUS_EPENDING: HW mode change is pending
+ * @SET_HW_MODE_STATUS_ECOEX: HW mode change conflict with Coex
+ */
+enum set_hw_mode_status {
+	SET_HW_MODE_STATUS_OK,
+	SET_HW_MODE_STATUS_EINVAL,
+	SET_HW_MODE_STATUS_ECANCELED,
+	SET_HW_MODE_STATUS_ENOTSUP,
+	SET_HW_MODE_STATUS_EHARDWARE,
+	SET_HW_MODE_STATUS_EPENDING,
+	SET_HW_MODE_STATUS_ECOEX,
+};
+
 typedef struct sSirRemainOnChnReq {
 	uint16_t messageType;
 	uint16_t length;
@@ -493,6 +517,7 @@ typedef struct sSirSmeReadyReq {
 	void *csr_roam_synch_cb;
 	void *pe_roam_synch_cb;
 	void *sme_msg_cb;
+	void *stop_roaming_cb;
 } tSirSmeReadyReq, *tpSirSmeReadyReq;
 
 /**
@@ -521,6 +546,9 @@ struct s_sir_set_hw_mode {
 	struct sir_hw_mode set_hw;
 };
 
+typedef void (*dual_mac_cb)(enum set_hw_mode_status status,
+		uint32_t scan_config,
+		uint32_t fw_mode_config);
 /**
  * struct sir_dual_mac_config - Dual MAC configuration
  * @scan_config: Scan configuration
@@ -530,7 +558,7 @@ struct s_sir_set_hw_mode {
 struct sir_dual_mac_config {
 	uint32_t scan_config;
 	uint32_t fw_mode_config;
-	void *set_dual_mac_cb;
+	dual_mac_cb set_dual_mac_cb;
 };
 
 /**
@@ -546,16 +574,35 @@ struct sir_set_dual_mac_cfg {
 };
 
 /**
+ * enum set_antenna_mode_status - Status of set antenna mode
+ * command
+ * @SET_ANTENNA_MODE_STATUS_OK: command successful
+ * @SET_ANTENNA_MODE_STATUS_EINVAL: invalid antenna mode
+ * @SET_ANTENNA_MODE_STATUS_ECANCELED: mode change cancelled
+ * @SET_ANTENNA_MODE_STATUS_ENOTSUP: mode not supported
+ */
+enum set_antenna_mode_status {
+	SET_ANTENNA_MODE_STATUS_OK,
+	SET_ANTENNA_MODE_STATUS_EINVAL,
+	SET_ANTENNA_MODE_STATUS_ECANCELED,
+	SET_ANTENNA_MODE_STATUS_ENOTSUP,
+};
+
+typedef void (*antenna_mode_cb)(enum set_antenna_mode_status status,
+				void *context);
+
+/**
  * struct sir_antenna_mode_param - antenna mode param
  * @num_tx_chains: Number of TX chains
  * @num_rx_chains: Number of RX chains
- * @reason: Reason for setting antenna mode
  * @set_antenna_mode_resp: callback to set antenna mode command
+ * @set_antenna_mode_ctx: callback context to set antenna mode command
  */
 struct sir_antenna_mode_param {
 	uint32_t num_tx_chains;
 	uint32_t num_rx_chains;
-	void *set_antenna_mode_resp;
+	antenna_mode_cb set_antenna_mode_resp;
+	void *set_antenna_mode_ctx;
 };
 
 /**
@@ -835,6 +882,7 @@ typedef struct sSirBssDescription {
 	uint8_t nss;
 	uint8_t oce_wan_present;
 	uint8_t oce_wan_down_cap;
+	uint32_t rssi_per_chain[ATH_MAX_ANTENNA];
 	/* Please keep the structure 4 bytes aligned above the ieFields */
 	uint32_t ieFields[1];
 
@@ -912,6 +960,7 @@ typedef struct sSirSmeScanReq {
 	uint8_t dot11mode;
 	tSirScanType scanType;
 	uint32_t scan_id;
+	uint32_t scan_requestor_id;
 	/**
 	 * minChannelTime. Not used if scanType is passive.
 	 * 0x0 - Dont Use min channel timer. Only max channel timeout will used.
@@ -1304,9 +1353,15 @@ typedef struct sSirSmeJoinReq {
 #ifdef WLAN_FEATURE_FILS_SK
 	struct cds_fils_connection_info fils_con_info;
 #endif
+	bool sae_pmk_cached;
 	bool ignore_assoc_disallowed;
 	bool enable_bcast_probe_rsp;
 	bool force_24ghz_in_ht20;
+	bool force_rsne_override;
+	bool supported_nss_1x1;
+	uint8_t vdev_nss;
+	uint8_t nss;
+	bool nss_forced_1x1;
 	tSirBssDescription bssDescription;
 	/*
 	 * WARNING: Pls make bssDescription as last variable in struct
@@ -1460,6 +1515,7 @@ typedef struct sSirSmeAssocInd {
 
 	tDot11fIEHTCaps HTCaps;
 	tDot11fIEVHTCaps VHTCaps;
+	tSirMacCapabilityInfo capability_info;
 } tSirSmeAssocInd, *tpSirSmeAssocInd;
 
 /* / Definition for Association confirm */
@@ -2872,6 +2928,24 @@ typedef struct sSirUpdateAPWPARSNIEsReq {
 #define SIR_OFFLOAD_ENABLE                          1
 
 #ifdef WLAN_NS_OFFLOAD
+/**
+ * enum sir_ipv6_addr_scope - Internal identification of IPv6 addr scope
+ * @SIR_IPV6_ADDR_SCOPE_INVALID: invalid scope
+ * @SIR_IPV6_ADDR_SCOPE_NODELOCAL: node local scope
+ * @SIR_IPV6_ADDR_SCOPE_LINKLOCAL: link local scope
+ * @SIR_IPV6_ADDR_SCOPE_SITELOCAL: site local scope
+ * @SIR_IPV6_ADDR_SCOPE_ORGLOCAL: org local scope
+ * @SIR_IPV6_ADDR_SCOPE_GLOBAL: global scope
+ */
+enum sir_ipv6_addr_scope {
+	SIR_IPV6_ADDR_SCOPE_INVALID = 0,
+	SIR_IPV6_ADDR_SCOPE_NODELOCAL = 1,
+	SIR_IPV6_ADDR_SCOPE_LINKLOCAL = 2,
+	SIR_IPV6_ADDR_SCOPE_SITELOCAL = 3,
+	SIR_IPV6_ADDR_SCOPE_ORGLOCAL = 4,
+	SIR_IPV6_ADDR_SCOPE_GLOBAL = 5
+};
+
 typedef struct sSirNsOffloadReq {
 	uint8_t srcIPv6Addr[SIR_MAC_IPV6_ADDR_LEN];
 	uint8_t selfIPv6Addr[SIR_MAC_NUM_TARGET_IPV6_NS_OFFLOAD_NA][SIR_MAC_IPV6_ADDR_LEN];
@@ -2881,7 +2955,35 @@ typedef struct sSirNsOffloadReq {
 	uint8_t targetIPv6AddrValid[SIR_MAC_NUM_TARGET_IPV6_NS_OFFLOAD_NA];
 	uint8_t target_ipv6_addr_ac_type[SIR_MAC_NUM_TARGET_IPV6_NS_OFFLOAD_NA];
 	uint8_t slotIdx;
+	enum sir_ipv6_addr_scope scope[SIR_MAC_NUM_TARGET_IPV6_NS_OFFLOAD_NA];
 } tSirNsOffloadReq, *tpSirNsOffloadReq;
+
+/**
+ * sir_get_ipv6_addr_scope() - Convert linux specific IPv6 addr scope to
+ *                             WLAN driver specific value
+ * @scope: linux specific IPv6 addr scope
+ *
+ * Return: WLAN driver sepcific IPv6 addr scope
+ */
+static inline
+enum sir_ipv6_addr_scope
+sir_get_ipv6_addr_scope(uint32_t ipv6_scope)
+{
+	switch (ipv6_scope) {
+	case IPV6_ADDR_SCOPE_NODELOCAL:
+		return SIR_IPV6_ADDR_SCOPE_NODELOCAL;
+	case IPV6_ADDR_SCOPE_LINKLOCAL:
+		return SIR_IPV6_ADDR_SCOPE_LINKLOCAL;
+	case IPV6_ADDR_SCOPE_SITELOCAL:
+		return SIR_IPV6_ADDR_SCOPE_SITELOCAL;
+	case IPV6_ADDR_SCOPE_ORGLOCAL:
+		return SIR_IPV6_ADDR_SCOPE_ORGLOCAL;
+	case IPV6_ADDR_SCOPE_GLOBAL:
+		return SIR_IPV6_ADDR_SCOPE_GLOBAL;
+	default:
+		return SIR_IPV6_ADDR_SCOPE_INVALID;
+	}
+}
 #endif /* WLAN_NS_OFFLOAD */
 
 typedef struct sSirHostOffloadReq {
@@ -3242,6 +3344,21 @@ typedef struct {
 
 #define ALLOWED_ACTION_FRAME_MAP_WORDS (SIR_MAC_ACTION_MAX / 32)
 
+/*
+ * DROP_PUBLIC_ACTION_FRAME_BITMAP
+ *
+ * Bitmask is based on the below. The frames with 1's
+ * set to their corresponding bit can be dropped in FW.
+ *
+ * ----------------------------------+-----+------+
+ *         Type                      | Bit | Drop |
+ * ----------------------------------+-----+------+
+ * SIR_MAC_ACTION_MEASUREMENT_PILOT  |  7  |   1  |
+ * ----------------------------------+-----+------+
+ */
+#define DROP_PUBLIC_ACTION_FRAME_BITMAP \
+		(1 << SIR_MAC_ACTION_MEASUREMENT_PILOT)
+
 #ifndef ANI_SUPPORT_11H
 /*
  * DROP_SPEC_MGMT_ACTION_FRAME_BITMAP
@@ -3253,7 +3370,7 @@ typedef struct {
  *         Type                      | Bit | Drop |
  * ----------------------------------+-----+------+
  * SIR_MAC_ACTION_MEASURE_REQUEST_ID    0     1
- * SIR_MAC_ACTION_TPC_REQUEST_ID        1     1
+ * SIR_MAC_ACTION_TPC_REQUEST_ID        2     1
  * ----------------------------------+-----+------+
  */
 #define DROP_SPEC_MGMT_ACTION_FRAME_BITMAP \
@@ -3605,6 +3722,12 @@ typedef struct sSirRoamOffloadScanReq {
 	struct roam_fils_params roam_fils_params;
 #endif
 	struct scoring_param score_params;
+	struct rsn_caps rsn_caps;
+	struct wmi_11k_offload_params offload_11k_params;
+	uint32_t ho_delay_for_rx;
+	uint32_t min_delay_btw_roam_scans;
+	uint32_t roam_trigger_reason_bitmask;
+	bool roam_force_rssi_trigger;
 } tSirRoamOffloadScanReq, *tpSirRoamOffloadScanReq;
 
 typedef struct sSirRoamOffloadScanRsp {
@@ -3738,6 +3861,7 @@ typedef struct {
 	uint32_t kek_len;
 	uint64_t ullKeyReplayCounter;   /* replay counter */
 	struct qdf_mac_addr bssid;
+	bool is_fils_connection;
 } tSirGtkOffloadParams, *tpSirGtkOffloadParams;
 
 /*---------------------------------------------------------------------------
@@ -3804,26 +3928,6 @@ enum hw_mode_bandwidth {
 	HW_MODE_80_PLUS_80_MHZ,
 	HW_MODE_160_MHZ,
 	HW_MODE_MAX_BANDWIDTH
-};
-
-/**
- * enum set_hw_mode_status - Status of set HW mode command
- * @SET_HW_MODE_STATUS_OK: command successful
- * @SET_HW_MODE_STATUS_EINVAL: Requested invalid hw_mode
- * @SET_HW_MODE_STATUS_ECANCELED: HW mode change cancelled
- * @SET_HW_MODE_STATUS_ENOTSUP: HW mode not supported
- * @SET_HW_MODE_STATUS_EHARDWARE: HW mode change prevented by hardware
- * @SET_HW_MODE_STATUS_EPENDING: HW mode change is pending
- * @SET_HW_MODE_STATUS_ECOEX: HW mode change conflict with Coex
- */
-enum set_hw_mode_status {
-	SET_HW_MODE_STATUS_OK,
-	SET_HW_MODE_STATUS_EINVAL,
-	SET_HW_MODE_STATUS_ECANCELED,
-	SET_HW_MODE_STATUS_ENOTSUP,
-	SET_HW_MODE_STATUS_EHARDWARE,
-	SET_HW_MODE_STATUS_EPENDING,
-	SET_HW_MODE_STATUS_ECOEX,
 };
 
 /**
@@ -3926,21 +4030,6 @@ struct sir_hw_mode_trans_ind {
  */
 struct sir_dual_mac_config_resp {
 	uint32_t status;
-};
-
-/**
- * enum set_antenna_mode_status - Status of set antenna mode
- * command
- * @SET_ANTENNA_MODE_STATUS_OK: command successful
- * @SET_ANTENNA_MODE_STATUS_EINVAL: invalid antenna mode
- * @SET_ANTENNA_MODE_STATUS_ECANCELED: mode change cancelled
- * @SET_ANTENNA_MODE_STATUS_ENOTSUP: mode not supported
- */
-enum set_antenna_mode_status {
-	SET_ANTENNA_MODE_STATUS_OK,
-	SET_ANTENNA_MODE_STATUS_EINVAL,
-	SET_ANTENNA_MODE_STATUS_ECANCELED,
-	SET_ANTENNA_MODE_STATUS_ENOTSUP,
 };
 
 /**
@@ -4199,6 +4288,7 @@ typedef struct sAniHandoffReq {
 #define USER_SCAN_REQUESTOR_ID  0xA000
 #define ROC_SCAN_REQUESTOR_ID   0xB000
 #define PREAUTH_REQUESTOR_ID    0xC000
+#define ACS_SCAN_REQUESTOR_ID   0xD000
 
 typedef struct sSirScanOffloadReq {
 	uint8_t sessionId;
@@ -4432,6 +4522,11 @@ struct sir_peer_info_req {
  * @rssi: rssi
  * @tx_rate: last tx rate
  * @rx_rate: last rx rate
+ * @rx_mc_bc_cnt: Multicast broadcast packet count received from
+ *              current station
+ * MSB of rx_mc_bc_cnt indicates whether FW supports rx_mc_bc_cnt
+ * feature or not, if first bit is 1 it indictes that FW supports this
+ * feature, if it is 0 it indicates FW doesn't support this feature
  *
  * a station's information
  */
@@ -4440,6 +4535,7 @@ struct sir_peer_info {
 	int8_t rssi;
 	uint32_t tx_rate;
 	uint32_t rx_rate;
+	uint32_t rx_mc_bc_cnt;
 };
 
 /**
@@ -6702,9 +6798,6 @@ typedef void (*hw_mode_transition_cb)(uint32_t old_hw_mode_index,
 		uint32_t new_hw_mode_index,
 		uint32_t num_vdev_mac_entries,
 		struct sir_vdev_mac_map *vdev_mac_map);
-typedef void (*dual_mac_cb)(uint32_t status, uint32_t scan_config,
-		uint32_t fw_mode_config);
-typedef void (*antenna_mode_cb)(uint32_t status);
 
 /**
  * struct sir_nss_update_request
@@ -7211,17 +7304,17 @@ struct obss_scanparam {
 };
 
 /**
- * struct sir_bpf_set_offload - set bpf filter instructions
+ * struct sir_apf_set_offload - set apf filter instructions
  * @session_id: session identifier
- * @version: host bpf version
- * @filter_id: Filter ID for BPF filter
+ * @version: host apf version
+ * @filter_id: Filter ID for APF filter
  * @total_length: The total length of the full instruction
  *                total_length equal to 0 means reset
  * @current_offset: current offset, 0 means start a new setting
  * @current_length: Length of current @program
- * @program: BPF instructions
+ * @program: APF instructions
  */
-struct sir_bpf_set_offload {
+struct sir_apf_set_offload {
 	uint8_t  session_id;
 	uint32_t version;
 	uint32_t filter_id;
@@ -7232,18 +7325,18 @@ struct sir_bpf_set_offload {
 };
 
 /**
- * struct sir_bpf_offload_capabilities - get bpf Capabilities
- * @bpf_version: fw's implement version
- * @max_bpf_filters: max filters that fw supports
- * @max_bytes_for_bpf_inst: the max bytes that can be used as bpf instructions
- * @remaining_bytes_for_bpf_inst: remaining bytes for bpf instructions
+ * struct sir_apf_offload_capabilities - get apf Capabilities
+ * @apf_version: fw's implement version
+ * @max_apf_filters: max filters that fw supports
+ * @max_bytes_for_apf_inst: the max bytes that can be used as apf instructions
+ * @remaining_bytes_for_apf_inst: remaining bytes for apf instructions
  *
  */
-struct sir_bpf_get_offload {
-	uint32_t bpf_version;
-	uint32_t max_bpf_filters;
-	uint32_t max_bytes_for_bpf_inst;
-	uint32_t remaining_bytes_for_bpf_inst;
+struct sir_apf_get_offload {
+	uint32_t apf_version;
+	uint32_t max_apf_filters;
+	uint32_t max_bytes_for_apf_inst;
+	uint32_t remaining_bytes_for_apf_inst;
 };
 
 /**
@@ -7302,6 +7395,14 @@ struct sir_wake_lock_stats {
  * @pno_match: pno match wakeup count
  * @oem_response: oem response wakeup count
  * @pwr_save_fail_detected: pwr save fail detected wakeup count
+ * @mgmt_assoc: association request management frame
+ * @mgmt_disassoc: disassociation management frame
+ * @mgmt_assoc_resp: association response management frame
+ * @mgmt_reassoc: reassociate request management frame
+ * @mgmt_reassoc_resp: reassociate response management frame
+ * @mgmt_auth: authentication managament frame
+ * @mgmt_deauth: deauthentication management frame
+ * @mgmt_action: action managament frame
  */
 struct sir_vdev_wow_stats {
 	uint32_t ucast;
@@ -7320,6 +7421,14 @@ struct sir_vdev_wow_stats {
 	uint32_t pno_match;
 	uint32_t oem_response;
 	uint32_t pwr_save_fail_detected;
+	uint32_t mgmt_assoc;
+	uint32_t mgmt_disassoc;
+	uint32_t mgmt_assoc_resp;
+	uint32_t mgmt_reassoc;
+	uint32_t mgmt_reassoc_resp;
+	uint32_t mgmt_auth;
+	uint32_t mgmt_deauth;
+	uint32_t mgmt_action;
 };
 
 /**
@@ -7696,6 +7805,19 @@ struct ndp_responder_rsp_event {
 };
 
 /**
+ * struct ndp_channel_info - ndp channel and channel bandwidth
+ * @channel: channel freq in mhz of the ndp connection
+ * @ch_width: channel width (wmi_channel_width) of the ndp connection
+ * @nss: nss used for ndp connection
+ *
+ */
+struct ndp_channel_info {
+	uint32_t channel;
+	uint32_t ch_width;
+	uint32_t nss;
+};
+
+/**
  * struct ndp_confirm_event - ndp confirmation event from FW
  * @vdev_id: session id of the interface over which ndp is being created
  * @ndp_instance_id: ndp instance id for which confirm is being generated
@@ -7703,6 +7825,8 @@ struct ndp_responder_rsp_event {
  * @num_active_ndps_on_peer: number of ndp instances on peer
  * @peer_ndi_mac_addr: peer NDI mac address
  * @rsp_code: ndp response code
+ * @num_channels: num channels
+ * @ch: channel info struct array
  * @ndp_info: ndp application info
  *
  */
@@ -7713,6 +7837,8 @@ struct ndp_confirm_event {
 	uint32_t num_active_ndps_on_peer;
 	struct qdf_mac_addr peer_ndi_mac_addr;
 	enum ndp_response_code rsp_code;
+	uint32_t num_channels;
+	struct ndp_channel_info ch[SIR_NAN_CH_INFO_MAX_CHANNELS];
 	struct ndp_app_info ndp_info;
 };
 
@@ -7803,6 +7929,27 @@ struct ndp_schedule_update_rsp {
 };
 
 /**
+ * struct ndp_sch_update_event - ndp schedule update indication
+ * @vdev_id: vdev id on which ndp schedule update was received
+ * @peer_addr: peer for which schedule update was received
+ * @flags: reason for sch update
+ * @num_channels: num of channels
+ * @num_ndp_instances: num of ndp instances
+ * @ch: channel info array
+ * @ndp_instances: array of ndp instances
+ *
+ */
+struct ndp_sch_update_event {
+	uint32_t vdev_id;
+	struct qdf_mac_addr peer_addr;
+	uint32_t flags;
+	uint32_t num_channels;
+	uint32_t num_ndp_instances;
+	struct ndp_channel_info ch[SIR_NAN_CH_INFO_MAX_CHANNELS];
+	uint32_t *ndp_instances;
+};
+
+/**
  * struct sme_ndp_peer_ind - ndp peer indication
  * @msg_type: message id
  * @msg_len: message length
@@ -7825,12 +7972,36 @@ struct sme_ndp_peer_ind {
  * struct sir_set_tx_rx_aggregation_size - sets tx rx aggregation size
  * @vdev_id: vdev id of the session
  * @tx_aggregation_size: Tx aggregation size
+ * @tx_aggregation_size_be: Tx aggregation size for be queue
+ * @tx_aggregation_size_bk: Tx aggregation size for bk queue
+ * @tx_aggregation_size_vi: Tx aggregation size for vi queue
+ * @tx_aggregation_size_vo: Tx aggregation size for vo queue
  * @rx_aggregation_size: Rx aggregation size
  */
 struct sir_set_tx_rx_aggregation_size {
 	uint8_t vdev_id;
 	uint32_t tx_aggregation_size;
+	uint32_t tx_aggregation_size_be;
+	uint32_t tx_aggregation_size_bk;
+	uint32_t tx_aggregation_size_vi;
+	uint32_t tx_aggregation_size_vo;
 	uint32_t rx_aggregation_size;
+};
+
+/**
+ * struct sir_set_tx_aggr_sw_retry_threshold - set sw retry threshold
+ * @vdev_id: vdev id of the session
+ * @tx_aggr_sw_retry_threshold_be: sw retry threshold for BE
+ * @tx_aggr_sw_retry_threshold_bk: sw retry threshold for BK
+ * @tx_aggr_sw_retry_threshold_vi: sw retry threshold for VI
+ * @tx_aggr_sw_retry_threshold_vo: sw retry threshold for VO
+ */
+struct sir_set_tx_aggr_sw_retry_threshold {
+	uint8_t vdev_id;
+	uint32_t tx_aggr_sw_retry_threshold_be;
+	uint32_t tx_aggr_sw_retry_threshold_bk;
+	uint32_t tx_aggr_sw_retry_threshold_vi;
+	uint32_t tx_aggr_sw_retry_threshold_vo;
 };
 
 /**
@@ -8138,11 +8309,15 @@ struct action_frame_random_filter {
 
 /**
  * struct chain_rssi_result - chain rssi result
+ * num_chains_valid: chains vaild number
  * @chain_rssi: chain rssi result
+ * @ant_id: antenna id
  */
 struct chain_rssi_result {
-	#define CHAIN_RSSI_NUM  8
-	uint32_t chain_rssi[CHAIN_RSSI_NUM];
+	#define CHAIN_MAX_NUM  8
+	uint32_t num_chains_valid;
+	uint32_t chain_rssi[CHAIN_MAX_NUM];
+	uint32_t ant_id[CHAIN_MAX_NUM];
 };
 
 /**
@@ -8322,4 +8497,50 @@ struct sir_limit_off_chan {
 	uint32_t rest_time;
 	bool skip_dfs_chans;
 };
+
+typedef void (*roam_scan_stats_cb)(void *context,
+				   struct wmi_roam_scan_stats_res *res);
+
+/**
+ * struct sir_roam_scan_stats - Stores roam scan context
+ * @vdev_id: vdev id
+ * @cb: callback to be invoked for roam scan stats response
+ * @context: context of callback
+ */
+struct sir_roam_scan_stats {
+	uint32_t vdev_id;
+	roam_scan_stats_cb cb;
+	void *context;
+};
+
+/**
+ * struct sae_info - SAE info used for commit/confirm messages
+ * @msg_type: Message type
+ * @msg_len: length of message
+ * @vdev_id: vdev id
+ * @peer_mac_addr: peer MAC address
+ * @ssid: SSID
+ */
+struct sir_sae_info {
+	uint16_t msg_type;
+	uint16_t msg_len;
+	uint32_t vdev_id;
+	struct qdf_mac_addr peer_mac_addr;
+	tSirMacSSid ssid;
+};
+
+/**
+ * struct sir_sae_msg - SAE msg used for message posting
+ * @message_type: message type
+ * @length: message length
+ * @session_id: SME session id
+ * @sae_status: SAE status, 0: Success, Non-zero: Failure.
+ */
+struct sir_sae_msg {
+	uint16_t message_type;
+	uint16_t length;
+	uint16_t session_id;
+	uint8_t sae_status;
+};
+
 #endif /* __SIR_API_H */

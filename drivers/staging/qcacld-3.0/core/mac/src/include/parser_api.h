@@ -1,9 +1,6 @@
 /*
  * Copyright (c) 2012-2018 The Linux Foundation. All rights reserved.
  *
- * Previously licensed under the ISC license by Qualcomm Atheros, Inc.
- *
- *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
  * above copyright notice and this permission notice appear in all
@@ -17,12 +14,6 @@
  * PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER
  * TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR
  * PERFORMANCE OF THIS SOFTWARE.
- */
-
-/*
- * This file was originally distributed by Qualcomm Atheros, Inc.
- * under proprietary terms before Copyright ownership was assigned
- * to the Linux Foundation.
  */
 
 /*
@@ -804,10 +795,21 @@ populate_dot11f_ext_supp_rates(tpAniSirGlobal pMac,
 			uint8_t nChannelNum, tDot11fIEExtSuppRates *pDot11f,
 			tpPESession psessionEntry);
 
+/**
+ * populate_dot11f_beacon_report() - Populate the Beacon Report IE
+ * @pMac: Pointer to the global MAC context
+ * @pDot11f: Pointer to the measurement report structure
+ * @pBeaconReport: Pointer to the Beacon Report structure
+ * @last_beacon_report_params: Last Beacon Report indication params
+ *
+ * Return: Ret Status
+ */
 tSirRetStatus
 populate_dot11f_beacon_report(tpAniSirGlobal pMac,
 			tDot11fIEMeasurementReport *pDot11f,
-			tSirMacBeaconReport *pBeaconReport);
+			tSirMacBeaconReport *pBeaconReport,
+			struct rrm_beacon_report_last_beacon_params
+			*last_beacon_report_params);
 
 /**
  * \brief Populate a tDot11fIEExtSuppRates

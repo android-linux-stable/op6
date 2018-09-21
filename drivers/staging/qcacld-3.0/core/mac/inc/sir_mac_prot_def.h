@@ -1,8 +1,5 @@
 /*
- * Copyright (c) 2011-2017 The Linux Foundation. All rights reserved.
- *
- * Previously licensed under the ISC license by Qualcomm Atheros, Inc.
- *
+ * Copyright (c) 2011-2018 The Linux Foundation. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -18,13 +15,6 @@
  * TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR
  * PERFORMANCE OF THIS SOFTWARE.
  */
-
-/*
- * This file was originally distributed by Qualcomm Atheros, Inc.
- * under proprietary terms before Copyright ownership was assigned
- * to the Linux Foundation.
- */
-
 
 /*
  * This file sir_mac_prot_def.h contains the MAC/PHY protocol
@@ -198,6 +188,8 @@
 #define SIR_MAC_VHT_GID_NOTIFICATION           1
 #define SIR_MAC_VHT_OPMODE_NOTIFICATION        2
 
+#define SIR_MAC_VHT_OPMODE_SIZE                3
+
 #define NUM_OF_SOUNDING_DIMENSIONS	1 /*Nss - 1, (Nss = 2 for 2x2)*/
 /* HT Action Field Codes */
 #define SIR_MAC_SM_POWER_SAVE       1
@@ -215,7 +207,13 @@
 /* Public Action for 20/40 BSS Coexistence */
 #define SIR_MAC_ACTION_2040_BSS_COEXISTENCE     0
 #define SIR_MAC_ACTION_EXT_CHANNEL_SWITCH_ID    4
+#define SIR_MAC_ACTION_MEASUREMENT_PILOT        7
 
+/* Public Action frames for GAS */
+#define SIR_MAC_ACTION_GAS_INITIAL_REQUEST      0x0A
+#define SIR_MAC_ACTION_GAS_INITIAL_RESPONSE     0x0B
+#define SIR_MAC_ACTION_GAS_COMEBACK_REQUEST     0x0C
+#define SIR_MAC_ACTION_GAS_COMEBACK_RESPONSE    0x0D
 
 #ifdef WLAN_FEATURE_11W
 /* 11w SA query request/response action frame category code */
@@ -442,6 +440,9 @@
 
 #define SIR_MAC_OUI_VERSION_1         1
 
+/* OWE DH Parameter element https://tools.ietf.org/html/rfc8110 */
+#define SIR_DH_PARAMETER_ELEMENT_EXT_EID 32
+
 /* OUI and type definition for WPA IE in network byte order */
 #define SIR_MAC_WPA_OUI             0x01F25000
 #define SIR_MAC_WME_OUI             0x02F25000
@@ -628,6 +629,11 @@
 
 #define SIR_MAC_VENDOR_AP_4_OUI             "\x8C\xFD\xF0"
 #define SIR_MAC_VENDOR_AP_4_OUI_LEN         3
+
+/* Maximum allowable size of a beacon and probe rsp frame */
+#define SIR_MAX_BEACON_SIZE    512
+#define SIR_MAX_PROBE_RESP_SIZE 512
+
 /* / Status Code (present in Management response frames) enum */
 
 typedef enum eSirMacStatusCodes {

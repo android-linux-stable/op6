@@ -1,8 +1,5 @@
 /*
- * Copyright (c) 2012-2017 The Linux Foundation. All rights reserved.
- *
- * Previously licensed under the ISC license by Qualcomm Atheros, Inc.
- *
+ * Copyright (c) 2012-2018 The Linux Foundation. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -17,12 +14,6 @@
  * PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER
  * TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR
  * PERFORMANCE OF THIS SOFTWARE.
- */
-
-/*
- * This file was originally distributed by Qualcomm Atheros, Inc.
- * under proprietary terms before Copyright ownership was assigned
- * to the Linux Foundation.
  */
 
 /*===========================================================================
@@ -395,6 +386,13 @@ void lim_send_sme_mgmt_frame_ind(tpAniSirGlobal pMac, uint8_t frameType,
 		return;
 	}
 
+	if (qdf_is_macaddr_broadcast(
+		(struct qdf_mac_addr *) pSirSmeMgmtFrame->frameBuf + 4) &&
+		!sessionId) {
+		pe_debug("Broadcast action frame");
+		sessionId = SME_SESSION_ID_BROADCAST;
+	}
+
 	pSirSmeMgmtFrame->frame_len = frameLen;
 	pSirSmeMgmtFrame->sessionId = sessionId;
 	pSirSmeMgmtFrame->frameType = frameType;
@@ -643,7 +641,7 @@ void lim_send_p2p_action_frame(tpAniSirGlobal mac_ctx,
 			if (NULL != p2p_ie) {
 				/* extract the presence of NoA attribute inside
 				 * P2P IE */
-				presence_noa_attr =  lim_get_ie_ptr_new(mac_ctx,
+				presence_noa_attr =  wlan_cfg_get_ie_ptr(
 					p2p_ie + SIR_P2P_IE_HEADER_LEN,
 					p2p_ie[1], SIR_P2P_NOA_ATTR, TWO_BYTE);
 			}

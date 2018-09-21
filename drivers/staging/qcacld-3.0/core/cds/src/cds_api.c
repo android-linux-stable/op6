@@ -1,9 +1,6 @@
 /*
  * Copyright (c) 2012-2018 The Linux Foundation. All rights reserved.
  *
- * Previously licensed under the ISC license by Qualcomm Atheros, Inc.
- *
- *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
  * above copyright notice and this permission notice appear in all
@@ -17,12 +14,6 @@
  * PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER
  * TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR
  * PERFORMANCE OF THIS SOFTWARE.
- */
-
-/*
- * This file was originally distributed by Qualcomm Atheros, Inc.
- * under proprietary terms before Copyright ownership was assigned
- * to the Linux Foundation.
  */
 
 /**
@@ -421,9 +412,10 @@ QDF_STATUS cds_open(void)
 		status = QDF_STATUS_E_FAILURE;
 		goto err_sched_close;
 	}
-	hdd_enable_fastpath(pHddCtx->config, scn);
-	hdd_wlan_update_target_info(pHddCtx, scn);
 
+	hdd_enable_fastpath(pHddCtx->config, scn);
+
+	/* Initialize BMI and Download firmware */
 	ol_ctx = cds_get_context(QDF_MODULE_ID_BMI);
 	/* Initialize BMI and Download firmware */
 	status = bmi_download_firmware(ol_ctx);
@@ -432,6 +424,9 @@ QDF_STATUS cds_open(void)
 			  "BMI FIALED status:%d", status);
 		goto err_bmi_close;
 	}
+
+	hdd_wlan_update_target_info(pHddCtx, scn);
+
 	htcInfo.pContext = ol_ctx;
 	htcInfo.TargetFailure = ol_target_failure;
 	htcInfo.TargetSendSuspendComplete = wma_target_suspend_acknowledge;
@@ -884,6 +879,9 @@ QDF_STATUS cds_disable(v_CONTEXT_t cds_context)
 {
 	QDF_STATUS qdf_status;
 	void *handle;
+
+	if (gp_cds_sched_context)
+		cds_sched_flush_mc_mqs(gp_cds_sched_context);
 
 	qdf_status = wma_stop(cds_context, HAL_STOP_TYPE_RF_KILL);
 
@@ -2255,6 +2253,9 @@ QDF_STATUS cds_set_log_completion(uint32_t is_fatal,
 	p_cds_context->log_complete.recovery_needed = recovery_needed;
 	p_cds_context->log_complete.is_report_in_progress = true;
 	qdf_spinlock_release(&p_cds_context->bug_report_lock);
+	QDF_TRACE(QDF_MODULE_ID_QDF, QDF_TRACE_LEVEL_DEBUG,
+		  "%s: is_fatal %d ind %d reasn_code %d recovery needed %d",
+		   __func__, is_fatal, indicator, reason_code, recovery_needed);
 	return QDF_STATUS_SUCCESS;
 }
 
@@ -2481,7 +2482,7 @@ QDF_STATUS cds_flush_logs(uint32_t is_fatal,
 		return QDF_STATUS_E_FAILURE;
 	}
 
-	QDF_TRACE(QDF_MODULE_ID_QDF, QDF_TRACE_LEVEL_ERROR,
+	QDF_TRACE(QDF_MODULE_ID_QDF, QDF_TRACE_LEVEL_INFO,
 			"%s: Triggering bug report: type:%d, indicator=%d reason_code=%d",
 			__func__, is_fatal, indicator, reason_code);
 
@@ -2927,21 +2928,53 @@ cds_print_htc_credit_history(uint32_t count, qdf_abstract_print *print,
 #endif
 
 #ifdef ENABLE_SMMU_S1_TRANSLATION
-void cds_smmu_mem_map_setup(qdf_device_t osdev)
+QDF_STATUS cds_smmu_mem_map_setup(qdf_device_t osdev, bool ipa_present)
 {
 	int attr = 0;
+	bool ipa_smmu_enable = false;
 	struct dma_iommu_mapping *mapping = pld_smmu_get_mapping(osdev->dev);
 
 	osdev->smmu_s1_enabled = false;
-	if (!mapping) {
-		cds_info("No SMMU mapping present");
-		return;
+
+	if (ipa_present) {
+		ipa_smmu_enable = qdf_get_ipa_smmu_status();
+		if (ipa_smmu_enable)
+			cds_info("SMMU enabled from IPA side");
+		else
+			cds_info("SMMU not enabled from IPA side");
 	}
 
-	if ((iommu_domain_get_attr(mapping->domain,
-				   DOMAIN_ATTR_S1_BYPASS, &attr) == 0) &&
-				   !attr)
-		osdev->smmu_s1_enabled = true;
+	if (mapping && ((iommu_domain_get_attr(mapping->domain,
+			 DOMAIN_ATTR_S1_BYPASS, &attr) == 0) &&
+			 !attr)) {
+		cds_info("SMMU enabled from WLAN side");
+
+		if (ipa_present) {
+			if (ipa_smmu_enable) {
+				cds_info("SMMU enabled from both IPA and WLAN side");
+				osdev->smmu_s1_enabled = true;
+			} else {
+				cds_err("SMMU mismatch: IPA: disable, WLAN: enable");
+				return QDF_STATUS_E_FAILURE;
+			}
+		} else {
+			osdev->smmu_s1_enabled = true;
+		}
+
+	} else {
+		cds_info("No SMMU mapping present or SMMU disabled from WLAN side");
+
+		if (ipa_present) {
+			if (ipa_smmu_enable) {
+				cds_err("SMMU mismatch: IPA: enable, WLAN: disable");
+				return QDF_STATUS_E_FAILURE;
+			} else {
+				cds_info("SMMU diabled from both IPA and WLAN side");
+			}
+		}
+	}
+
+	return QDF_STATUS_SUCCESS;
 }
 
 #ifdef IPA_OFFLOAD
@@ -2957,9 +2990,10 @@ int cds_smmu_map_unmap(bool map, uint32_t num_buf, qdf_mem_info_t *buf_arr)
 #endif
 
 #else
-void cds_smmu_mem_map_setup(qdf_device_t osdev)
+QDF_STATUS cds_smmu_mem_map_setup(qdf_device_t osdev, bool ipa_present)
 {
 	osdev->smmu_s1_enabled = false;
+	return QDF_STATUS_SUCCESS;
 }
 
 int cds_smmu_map_unmap(bool map, uint32_t num_buf, qdf_mem_info_t *buf_arr)
@@ -2999,4 +3033,34 @@ bool cds_is_sta_sap_scc_allowed_on_dfs_channel(void)
 		ret = true;
 
 	return ret;
+}
+
+QDF_STATUS cds_register_mode_change_cb(send_mode_change_event_cb callback)
+{
+	p_cds_contextType cds_ctx;
+
+	cds_ctx = cds_get_global_context();
+	if (!cds_ctx) {
+		cds_err("Invalid CDS context");
+		return QDF_STATUS_E_FAILURE;
+	}
+
+	cds_ctx->mode_change_cb = callback;
+
+	return QDF_STATUS_SUCCESS;
+}
+
+QDF_STATUS cds_deregister_mode_change_cb(void)
+{
+	p_cds_contextType cds_ctx;
+
+	cds_ctx = cds_get_global_context();
+	if (!cds_ctx) {
+		cds_err("Invalid CDS context");
+		return QDF_STATUS_E_FAILURE;
+	}
+
+	cds_ctx->mode_change_cb = NULL;
+
+	return QDF_STATUS_SUCCESS;
 }

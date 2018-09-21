@@ -1,9 +1,6 @@
 /*
  * Copyright (c) 2012-2018 The Linux Foundation. All rights reserved.
  *
- * Previously licensed under the ISC license by Qualcomm Atheros, Inc.
- *
- *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
  * above copyright notice and this permission notice appear in all
@@ -17,12 +14,6 @@
  * PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER
  * TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR
  * PERFORMANCE OF THIS SOFTWARE.
- */
-
-/*
- * This file was originally distributed by Qualcomm Atheros, Inc.
- * under proprietary terms before Copyright ownership was assigned
- * to the Linux Foundation.
  */
 
 #if !defined(__LIM_SESSION_H)
@@ -68,10 +59,6 @@ typedef struct tagComebackTimerInfo {
 /* Maximum Number of WEP KEYS */
 #define MAX_WEP_KEYS 4
 
-/* Maximum allowable size of a beacon frame */
-#define SCH_MAX_BEACON_SIZE    512
-
-#define SCH_MAX_PROBE_RESP_SIZE 512
 #define SCH_PROTECTION_RESET_TIME 4000
 
 /*--------------------------------------------------------------------------
@@ -95,6 +82,10 @@ typedef struct join_params {
 	uint16_t pe_session_id;
 	tSirResultCodes result_code;
 } join_params;
+
+struct session_params {
+	uint16_t session_id;
+};
 
 typedef struct sPESession       /* Added to Support BT-AMP */
 {
@@ -356,6 +347,7 @@ typedef struct sPESession       /* Added to Support BT-AMP */
 	uint32_t peerAIDBitmap[2];
 	bool tdls_prohibited;
 	bool tdls_chan_swit_prohibited;
+	bool is_tdls_csa;
 #endif
 	bool fWaitForProbeRsp;
 	bool fIgnoreCapsChange;
@@ -455,6 +447,8 @@ typedef struct sPESession       /* Added to Support BT-AMP */
 	uint8_t  is_key_installed;
 	/* timer for reseting protection fileds at regular intervals */
 	qdf_mc_timer_t protection_fields_reset_timer;
+	/* timer to decrement CSA/ECSA count */
+	qdf_mc_timer_t ap_ecsa_timer;
 	void *mac_ctx;
 	/*
 	 * variable to store state of various protection struct like
@@ -514,6 +508,7 @@ typedef struct sPESession       /* Added to Support BT-AMP */
 	bool recvd_disassoc_while_roaming;
 	bool deauth_disassoc_rc;
 	int8_t def_max_tx_pwr;
+	bool sae_pmk_cached;
 } tPESession, *tpPESession;
 
 /*-------------------------------------------------------------------------

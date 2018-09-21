@@ -1,8 +1,5 @@
 /*
- * Copyright (c) 2011-2017 The Linux Foundation. All rights reserved.
- *
- * Previously licensed under the ISC license by Qualcomm Atheros, Inc.
- *
+ * Copyright (c) 2011-2018 The Linux Foundation. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -17,12 +14,6 @@
  * PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER
  * TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR
  * PERFORMANCE OF THIS SOFTWARE.
- */
-
-/*
- * This file was originally distributed by Qualcomm Atheros, Inc.
- * under proprietary terms before Copyright ownership was assigned
- * to the Linux Foundation.
  */
 
 /*
@@ -937,6 +928,20 @@ QDF_STATUS csr_roam_set_pmkid_cache(tpAniSirGlobal pMac, uint32_t sessionId,
 
 #ifdef WLAN_FEATURE_ROAM_OFFLOAD
 /*
+ * csr_get_pmk_info(): store PMK in pmk_cache
+ * @mac_ctx: pointer to global structure for MAC
+ * @session_id: Sme session id
+ * @pmk_cache: pointer to a structure of Pmk
+ *
+ * This API gets the PMK from the session and
+ * stores it in the pmk_cache
+ *
+ * Return: none
+ */
+void csr_get_pmk_info(tpAniSirGlobal mac_ctx, uint8_t session_id,
+		      tPmkidCacheInfo *pmk_cache);
+
+/*
  * csr_roam_set_psk_pmk() -
  * store PSK/PMK
  * pMac  - pointer to global structure for MAC
@@ -1281,5 +1286,19 @@ static inline bool csr_is_mfpc_capable(struct sDot11fIERSN *rsn)
 	return false;
 }
 #endif
+
+/**
+ * csr_lookup_pmkid_using_bssid() - lookup pmkid using bssid
+ * @mac: pointer to mac
+ * @session: sme session pointer
+ * @pmk_cache: pointer to pmk cache
+ * @index: index value needs to be seached
+ *
+ * Return: true if pmkid is found else false
+ */
+bool csr_lookup_pmkid_using_bssid(tpAniSirGlobal mac,
+					tCsrRoamSession *session,
+					tPmkidCacheInfo *pmk_cache,
+					uint32_t *index);
 
 #endif /* CSR_INSIDE_API_H__ */

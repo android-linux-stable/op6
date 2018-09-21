@@ -1,8 +1,5 @@
 /*
- * Copyright (c) 2011-2017 The Linux Foundation. All rights reserved.
- *
- * Previously licensed under the ISC license by Qualcomm Atheros, Inc.
- *
+ * Copyright (c) 2011-2018 The Linux Foundation. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -17,12 +14,6 @@
  * PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER
  * TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR
  * PERFORMANCE OF THIS SOFTWARE.
- */
-
-/*
- * This file was originally distributed by Qualcomm Atheros, Inc.
- * under proprietary terms before Copyright ownership was assigned
- * to the Linux Foundation.
  */
 
 /*
@@ -236,11 +227,14 @@ lim_process_probe_rsp_frame(tpAniSirGlobal mac_ctx, uint8_t *rx_Packet_info,
 		if (LIM_IS_STA_ROLE(session_entry) &&
 				!wma_is_csa_offload_enabled()) {
 			if (probe_rsp->channelSwitchPresent) {
+#ifdef FEATURE_WLAN_TDLS
 				/*
 				 * on receiving channel switch announcement
 				 * from AP, delete all TDLS peers before
 				 * leaving BSS and proceed for channel switch
 				 */
+				session_entry->is_tdls_csa = true;
+#endif
 				lim_delete_tdls_peers(mac_ctx, session_entry);
 
 				lim_update_channel_switch(mac_ctx,
@@ -347,10 +341,6 @@ lim_process_probe_rsp_frame_no_session(tpAniSirGlobal mac_ctx,
 
 	header = WMA_GET_RX_MAC_HEADER(rx_packet_info);
 
-	pe_debug("Received Probe Response frame with length=%d from",
-		WMA_GET_RX_MPDU_LEN(rx_packet_info));
-	lim_print_mac_addr(mac_ctx, header->sa, LOGD);
-
 	/* Validate IE information before processing Probe Response Frame */
 	if (lim_validate_ie_information_in_probe_rsp_frame(mac_ctx,
 				rx_packet_info) !=
@@ -361,11 +351,6 @@ lim_process_probe_rsp_frame_no_session(tpAniSirGlobal mac_ctx,
 	}
 
 	frame_len = WMA_GET_RX_PAYLOAD_LEN(rx_packet_info);
-	pe_debug("Probe Resp Frame Received: BSSID "
-		  MAC_ADDRESS_STR " (RSSI %d)",
-		  MAC_ADDR_ARRAY(header->bssId),
-		  (uint) abs((int8_t)WMA_GET_RX_RSSI_NORMALIZED(
-					rx_packet_info)));
 	/*
 	 * Get pointer to Probe Response frame body
 	 */
@@ -378,7 +363,6 @@ lim_process_probe_rsp_frame_no_session(tpAniSirGlobal mac_ctx,
 		return;
 	}
 
-	pe_debug("Save this probe rsp in LFR cache");
 	lim_check_and_add_bss_description(mac_ctx, probe_rsp,
 		  rx_packet_info, false, true);
 	qdf_mem_free(probe_rsp);

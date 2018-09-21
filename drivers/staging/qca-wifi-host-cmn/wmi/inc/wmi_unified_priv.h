@@ -1,9 +1,6 @@
 /*
  * Copyright (c) 2013-2018 The Linux Foundation. All rights reserved.
  *
- * Previously licensed under the ISC license by Qualcomm Atheros, Inc.
- *
- *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
  * above copyright notice and this permission notice appear in all
@@ -17,12 +14,6 @@
  * PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER
  * TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR
  * PERFORMANCE OF THIS SOFTWARE.
- */
-
-/*
- * This file was originally distributed by Qualcomm Atheros, Inc.
- * under proprietary terms before Copyright ownership was assigned
- * to the Linux Foundation.
  */
 
 /*
@@ -760,10 +751,23 @@ QDF_STATUS (*send_get_buf_extscan_hotlist_cmd)(wmi_unified_t wmi_handle,
 				   struct ext_scan_setbssi_hotlist_params *
 				   photlist, int *buf_len);
 
-QDF_STATUS (*send_set_active_bpf_mode_cmd)(wmi_unified_t wmi_handle,
+QDF_STATUS (*send_set_active_apf_mode_cmd)(wmi_unified_t wmi_handle,
 					   uint8_t vdev_id,
 					   FW_ACTIVE_BPF_MODE ucast_mode,
 					   FW_ACTIVE_BPF_MODE mcast_bcast_mode);
+
+QDF_STATUS (*send_apf_enable_cmd)(wmi_unified_t wmi_handle, uint32_t vdev_id,
+				  bool enable);
+
+QDF_STATUS (*send_apf_write_work_memory_cmd)(wmi_unified_t wmi_handle,
+			struct wmi_apf_write_memory_params *apf_write_params);
+
+QDF_STATUS (*send_apf_read_work_memory_cmd)(wmi_unified_t wmi_handle,
+			struct wmi_apf_read_memory_params *apf_read_params);
+
+QDF_STATUS (*extract_apf_read_memory_resp_event)(wmi_unified_t wmi_handle,
+			void *evt_buf,
+			struct wmi_apf_read_memory_resp_event_params *resp);
 
 QDF_STATUS (*send_pdev_get_tpc_config_cmd)(wmi_unified_t wmi_handle,
 		uint32_t param);
@@ -1208,6 +1212,10 @@ QDF_STATUS (*extract_sar_limit_event)(wmi_unified_t wmi_handle,
 				      uint8_t *evt_buf,
 				      struct sar_limit_event *event);
 
+QDF_STATUS (*extract_sar2_result_event)(void *handle,
+					uint8_t *event,
+					uint32_t len);
+
 uint16_t (*wmi_set_htc_tx_tag)(wmi_unified_t wmi_handle,
 				wmi_buf_t buf, uint32_t cmd_id);
 
@@ -1219,6 +1227,20 @@ QDF_STATUS (*send_limit_off_chan_cmd)(wmi_unified_t wmi_handle,
 
 QDF_STATUS (*send_wow_timer_pattern_cmd)(wmi_unified_t wmi_handle,
 			uint8_t vdev_id, uint32_t cookie, uint32_t time);
+
+QDF_STATUS (*send_roam_scan_stats_cmd)(wmi_unified_t wmi_handle,
+				       struct wmi_roam_scan_stats_req *params);
+
+QDF_STATUS (*extract_roam_scan_stats_res_evt)(wmi_unified_t wmi_handle,
+				void *evt_buf,
+				uint32_t *vdev_id,
+				struct wmi_roam_scan_stats_res **res_param);
+
+QDF_STATUS (*send_offload_11k_cmd)(wmi_unified_t wmi_handle,
+		struct wmi_11k_offload_params *params);
+
+QDF_STATUS (*send_invoke_neighbor_report_cmd)(wmi_unified_t wmi_handle,
+		struct wmi_invoke_neighbor_report_params *params);
 };
 
 struct target_abi_version {
@@ -1301,6 +1323,7 @@ struct wmi_unified {
 	uint32_t vdev_param[wmi_vdev_param_max];
 	uint32_t services[wmi_services_max];
 #endif
+	bool (*is_target_ready)(void);
 };
 #ifdef WMI_NON_TLV_SUPPORT
 /* ONLY_NON_TLV_TARGET:TLV attach dummy function defintion for case when

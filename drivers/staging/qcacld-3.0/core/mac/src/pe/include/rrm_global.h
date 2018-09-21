@@ -1,8 +1,5 @@
 /*
- * Copyright (c) 2011-2012, 2014-2017 The Linux Foundation. All rights reserved.
- *
- * Previously licensed under the ISC license by Qualcomm Atheros, Inc.
- *
+ * Copyright (c) 2011-2012, 2014-2018 The Linux Foundation. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -17,12 +14,6 @@
  * PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER
  * TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR
  * PERFORMANCE OF THIS SOFTWARE.
- */
-
-/*
- * This file was originally distributed by Qualcomm Atheros, Inc.
- * under proprietary terms before Copyright ownership was assigned
- * to the Linux Foundation.
  */
 
 #if !defined(__RRMGLOBAL_H)
@@ -162,11 +153,26 @@ typedef struct sRRMReq {
 	union {
 		struct {
 			uint8_t reportingDetail;
+			uint8_t last_beacon_report_indication;
 			tRRMBeaconReportRequestedIes reqIes;
 		} Beacon;
 	} request;
 	uint8_t sendEmptyBcnRpt;
 } tRRMReq, *tpRRMReq;
+
+/**
+ * rrm_beacon_report_last_beacon_params - Last Beacon Report Indication params
+ * @last_beacon_ind: flag for whether last beacon indication is required
+ * @report_id: Report ID of the corresponding Beacon Report Request
+ * @frag_id: Current fragment's Fragment ID
+ * @num_frags: Total number of fragments in the Beacon Report
+ */
+struct rrm_beacon_report_last_beacon_params {
+	uint8_t last_beacon_ind;
+	uint8_t report_id;
+	uint8_t frag_id;
+	uint8_t num_frags;
+};
 
 typedef struct sRRMCaps {
 	uint8_t LinkMeasurement:1;
@@ -217,6 +223,7 @@ typedef struct sRrmPEContext {
 	int8_t txMgmtPower;
 	/* Dialog token for the request initiated from station. */
 	uint8_t DialogToken;
+	uint16_t prev_rrm_report_seq_num;
 	tpRRMReq pCurrentReq;
 } tRrmPEContext, *tpRrmPEContext;
 

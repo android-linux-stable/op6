@@ -1,9 +1,6 @@
 /*
  * Copyright (c) 2012-2018 The Linux Foundation. All rights reserved.
  *
- * Previously licensed under the ISC license by Qualcomm Atheros, Inc.
- *
- *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
  * above copyright notice and this permission notice appear in all
@@ -17,12 +14,6 @@
  * PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER
  * TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR
  * PERFORMANCE OF THIS SOFTWARE.
- */
-
-/*
- * This file was originally distributed by Qualcomm Atheros, Inc.
- * under proprietary terms before Copyright ownership was assigned
- * to the Linux Foundation.
  */
 
 #ifndef WLAN_QCT_WLANSAP_INTERNAL_H
@@ -274,6 +265,7 @@ typedef struct sSapContext {
 	enum sap_acs_dfs_mode dfs_mode;
 	uint8_t sap_sta_id;
 	bool is_chan_change_inprogress;
+	bool enable_etsi_srd_chan_support;
 	bool stop_bss_in_progress;
 } *ptSapContext;
 
@@ -434,8 +426,35 @@ QDF_STATUS sap_open_session(tHalHandle hHal, ptSapContext sapContext,
 QDF_STATUS sap_close_session(tHalHandle hHal,
 			     ptSapContext sapContext,
 			     csr_roamSessionCloseCallback callback, bool valid);
+
+/**
+ * sap_select_default_oper_chan() - Select AP mode default operating channel
+ * @acs_cfg: pointer to ACS config info
+ *
+ * Select AP mode default operating channel based on ACS hw mode and channel
+ * range configuration when ACS scan fails due to some reasons, such as scan
+ * timeout, etc.
+ *
+ * Return: Selected operating channel number
+ */
+uint8_t sap_select_default_oper_chan(struct sap_acs_cfg *acs_cfg);
+
+/**
+ * sap_channel_in_acs_channel_list() - check if channel in acs channel list
+ * @channel_num: channel to check
+ * @sap_ctx: struct ptSapContext
+ * @spect_info_params: strcut tSapChSelSpectInfo
+ *
+ * This function checks if specified channel is in the configured ACS channel
+ * list.
+ *
+ * Return: channel number if in acs channel list or SAP_CHANNEL_NOT_SELECTED
+ */
+uint8_t sap_channel_in_acs_channel_list(uint8_t channel_num,
+					ptSapContext sap_ctx,
+					tSapChSelSpectInfo *spect_info_params);
+
 #ifdef __cplusplus
 }
 #endif
-uint8_t sap_select_default_oper_chan(tHalHandle hal, uint32_t acs_hwmode);
 #endif

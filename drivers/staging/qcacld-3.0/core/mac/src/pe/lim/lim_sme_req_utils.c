@@ -1,9 +1,6 @@
 /*
  * Copyright (c) 2011-2018 The Linux Foundation. All rights reserved.
  *
- * Previously licensed under the ISC license by Qualcomm Atheros, Inc.
- *
- *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
  * above copyright notice and this permission notice appear in all
@@ -17,12 +14,6 @@
  * PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER
  * TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR
  * PERFORMANCE OF THIS SOFTWARE.
- */
-
-/*
- * This file was originally distributed by Qualcomm Atheros, Inc.
- * under proprietary terms before Copyright ownership was assigned
- * to the Linux Foundation.
  */
 
 /*
@@ -511,7 +502,13 @@ uint8_t lim_is_sme_join_req_valid(tpAniSirGlobal pMac, tpSirSmeJoinReq pJoinReq)
 {
 	uint8_t valid = true;
 
-	if (!lim_is_rsn_ie_valid_in_sme_req_message(pMac, &pJoinReq->rsnIE)) {
+	/*
+	 * If force_rsne_override is enabled that mean User has provided the
+	 * test RSNIE which need to be send as it is in assoc req and thus RSNIE
+	 * validity is not required.
+	 */
+	if (!pJoinReq->force_rsne_override &&
+	    !lim_is_rsn_ie_valid_in_sme_req_message(pMac, &pJoinReq->rsnIE)) {
 		pe_err("received SME_JOIN_REQ with invalid RSNIE");
 		valid = false;
 		goto end;

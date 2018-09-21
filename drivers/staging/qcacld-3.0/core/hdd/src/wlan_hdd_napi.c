@@ -1,9 +1,6 @@
 /*
  * Copyright (c) 2015-2018 The Linux Foundation. All rights reserved.
  *
- * Previously licensed under the ISC license by Qualcomm Atheros, Inc.
- *
- *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
  * above copyright notice and this permission notice appear in all
@@ -17,12 +14,6 @@
  * PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER
  * TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR
  * PERFORMANCE OF THIS SOFTWARE.
- */
-
-/*
- * This file was originally distributed by Qualcomm Atheros, Inc.
- * under proprietary terms before Copyright ownership was assigned
- * to the Linux Foundation.
  */
 
 /**
@@ -249,7 +240,7 @@ int hdd_napi_event(enum qca_napi_event event, void *data)
 	return rc;
 }
 
-#ifdef HELIUMPLUS
+#if defined HELIUMPLUS && defined MSM_PLATFORM
 /**
  * hdd_napi_perfd_cpufreq() - set/reset min CPU freq for cores
  * @req_state:  high/low
@@ -427,7 +418,7 @@ int hdd_napi_serialize(int is_on)
 	}
 	return rc;
 }
-#endif /* HELIUMPLUS */
+#endif /* HELIUMPLUS && MSM_PLATFORM */
 
 /**
  * hdd_napi_poll() - NAPI poll function
@@ -516,3 +507,33 @@ int hdd_display_napi_stats(void)
 	return 0;
 }
 
+/**
+ * hdd_clear_napi_stats() - clear NAPI stats
+ *
+ * Return: == 0: success; !=0: failure
+ */
+int hdd_clear_napi_stats(void)
+{
+	int i, j;
+	struct qca_napi_data *napid;
+	struct qca_napi_info *napii;
+	struct qca_napi_stat *napis;
+
+	napid = hdd_napi_get_all();
+	if (NULL == napid) {
+		hdd_err("%s unable to retrieve napi structure", __func__);
+		return -EFAULT;
+	}
+
+	for (i = 0; i < CE_COUNT_MAX; i++)
+		if (napid->ce_map & (0x01 << i)) {
+			napii = napid->napis[i];
+			for (j = 0; j < NR_CPUS; j++) {
+				napis = &(napii->stats[j]);
+				qdf_mem_zero(napis,
+					     sizeof(struct qca_napi_stat));
+			}
+		}
+
+	return 0;
+}

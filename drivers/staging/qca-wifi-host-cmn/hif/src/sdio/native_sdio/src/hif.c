@@ -1,8 +1,5 @@
 /*
- * Copyright (c) 2013-2017 The Linux Foundation. All rights reserved.
- *
- * Previously licensed under the ISC license by Qualcomm Atheros, Inc.
- *
+ * Copyright (c) 2013-2018 The Linux Foundation. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -17,12 +14,6 @@
  * PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER
  * TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR
  * PERFORMANCE OF THIS SOFTWARE.
- */
-
-/*
- * This file was originally distributed by Qualcomm Atheros, Inc.
- * under proprietary terms before Copyright ownership was assigned
- * to the Linux Foundation.
  */
 
 #include <linux/mmc/card.h>
@@ -1407,7 +1398,7 @@ void hif_sdio_shutdown(struct hif_softc *hif_ctx)
  */
 static void hif_irq_handler(struct sdio_func *func)
 {
-	QDF_STATUS status;
+	QDF_STATUS status = QDF_STATUS_SUCCESS;
 	struct hif_sdio_dev *device;
 
 	AR_DEBUG_PRINTF(ATH_DEBUG_TRACE,
@@ -1419,7 +1410,8 @@ static void hif_irq_handler(struct sdio_func *func)
 	 * it when we process cmds
 	 */
 	sdio_release_host(device->func);
-	status = device->htc_callbacks.dsrHandler(device->htc_callbacks
+	if (device->htc_callbacks.dsrHandler)
+		status = device->htc_callbacks.dsrHandler(device->htc_callbacks
 						  .context);
 	sdio_claim_host(device->func);
 	atomic_set(&device->irq_handling, 0);

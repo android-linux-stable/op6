@@ -1,9 +1,6 @@
 /*
  * Copyright (c) 2011-2018 The Linux Foundation. All rights reserved.
  *
- * Previously licensed under the ISC license by Qualcomm Atheros, Inc.
- *
- *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
  * above copyright notice and this permission notice appear in all
@@ -17,12 +14,6 @@
  * PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER
  * TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR
  * PERFORMANCE OF THIS SOFTWARE.
- */
-
-/*
- * This file was originally distributed by Qualcomm Atheros, Inc.
- * under proprietary terms before Copyright ownership was assigned
- * to the Linux Foundation.
  */
 
 /**
@@ -209,7 +200,7 @@ lim_send_probe_req_mgmt_frame(tpAniSirGlobal mac_ctx,
 			      uint8_t channel,
 			      tSirMacAddr self_macaddr,
 			      uint32_t dot11mode,
-			      uint32_t additional_ielen, uint8_t *additional_ie)
+			      uint16_t *additional_ielen, uint8_t *additional_ie)
 {
 	tDot11fProbeRequest pr;
 	uint32_t status, bytes, payload;
@@ -223,11 +214,14 @@ lim_send_probe_req_mgmt_frame(tpAniSirGlobal mac_ctx,
 	uint8_t sme_sessionid = 0;
 	bool is_vht_enabled = false;
 	uint8_t txPower;
-	uint16_t addn_ielen = additional_ielen;
+	uint16_t addn_ielen = 0;
 	bool extracted_ext_cap_flag = false;
 	tDot11fIEExtCap extracted_ext_cap;
 	tSirRetStatus sir_status;
 	uint8_t *qcn_ie = NULL;
+
+	if (additional_ielen)
+		addn_ielen = *additional_ielen;
 
 	/* The probe req should not send 11ac capabilieties if band is 2.4GHz,
 	 * unless enableVhtFor24GHz is enabled in INI. So if enableVhtFor24GHz
@@ -368,6 +362,8 @@ lim_send_probe_req_mgmt_frame(tpAniSirGlobal mac_ctx,
 					(&extracted_ext_cap);
 			extracted_ext_cap_flag =
 				(extracted_ext_cap.num_bytes > 0);
+			if (additional_ielen)
+				*additional_ielen = addn_ielen;
 		}
 		qcn_ie = cfg_get_vendor_ie_ptr_from_oui(mac_ctx,
 				SIR_MAC_QCN_OUI_TYPE, SIR_MAC_QCN_OUI_TYPE_SIZE,
@@ -1829,6 +1825,11 @@ lim_send_assoc_req_mgmt_frame(tpAniSirGlobal mac_ctx,
 		frm->vendor_vht_ie.sub_type =
 			pe_session->vendor_specific_vht_ie_sub_type;
 		frm->vendor_vht_ie.VHTCaps.present = 1;
+		if (!mac_ctx->roam.configParam.enable_subfee_vendor_vhtie &&
+		    pe_session->vht_config.su_beam_formee) {
+			pe_debug("Disable SU beamformee for vendor IE");
+			pe_session->vht_config.su_beam_formee = 0;
+		}
 		populate_dot11f_vht_caps(mac_ctx, pe_session,
 				&frm->vendor_vht_ie.VHTCaps);
 		vht_enabled = true;
@@ -1892,8 +1893,7 @@ lim_send_assoc_req_mgmt_frame(tpAniSirGlobal mac_ctx,
 		if (pe_session->beacon && pe_session->bcnLen > ie_offset) {
 			bcn_ie = pe_session->beacon + ie_offset;
 			bcn_ie_len = pe_session->bcnLen - ie_offset;
-			p_ext_cap = lim_get_ie_ptr_new(mac_ctx,
-							bcn_ie,
+			p_ext_cap = wlan_cfg_get_ie_ptr(bcn_ie,
 							bcn_ie_len,
 							DOT11F_EID_EXTCAP,
 							ONE_BYTE);
@@ -4135,34 +4135,15 @@ returnAfterError:
 	return statusCode;
 } /* End lim_send_link_report_action_frame. */
 
-/**
- * \brief Send a Beacon Report Action frame
- *
- *
- * \param pMac Pointer to the global MAC structure
- *
- * \param dialog_token dialog token to be used in the action frame.
- *
- * \param num_report number of reports in pRRMReport.
- *
- * \param pRRMReport Address of a tSirMacRadioMeasureReport.
- *
- * \param peer mac address of peer station.
- *
- * \param psessionEntry address of session entry.
- *
- * \return eSIR_SUCCESS on success, eSIR_FAILURE else
- *
- *
- */
-
 tSirRetStatus
 lim_send_radio_measure_report_action_frame(tpAniSirGlobal pMac,
-					   uint8_t dialog_token,
-					   uint8_t num_report,
-					   tpSirMacRadioMeasureReport pRRMReport,
-					   tSirMacAddr peer,
-					   tpPESession psessionEntry)
+				uint8_t dialog_token,
+				uint8_t num_report,
+				struct rrm_beacon_report_last_beacon_params
+				*last_beacon_report_params,
+				tpSirMacRadioMeasureReport pRRMReport,
+				tSirMacAddr peer,
+				tpPESession psessionEntry)
 {
 	tSirRetStatus statusCode = eSIR_SUCCESS;
 	uint8_t *pFrame;
@@ -4208,9 +4189,10 @@ lim_send_radio_measure_report_action_frame(tpAniSirGlobal pMac,
 		switch (pRRMReport[i].type) {
 		case SIR_MAC_RRM_BEACON_TYPE:
 			populate_dot11f_beacon_report(pMac,
-						      &frm->MeasurementReport[i],
-						      &pRRMReport[i].report.
-						      beaconReport);
+						     &frm->MeasurementReport[i],
+						     &pRRMReport[i].report.
+						     beaconReport,
+						     last_beacon_report_params);
 			frm->MeasurementReport[i].incapable =
 				pRRMReport[i].incapable;
 			frm->MeasurementReport[i].refused =
@@ -4590,3 +4572,85 @@ returnAfterError:
 	return nSirStatus;
 } /* End lim_send_sa_query_response_frame */
 #endif
+
+/**
+ * lim_tx_mgmt_frame() - Transmits Auth mgmt frame
+ * @mac_ctx Pointer to Global MAC structure
+ * @mb_msg: Received message info
+ * @msg_len: Received message length
+ * @packet: Packet to be transmitted
+ * @frame: Received frame
+ *
+ * Return: None
+ */
+static void lim_tx_mgmt_frame(tpAniSirGlobal mac_ctx,
+	struct sir_mgmt_msg *mb_msg, uint32_t msg_len,
+	void *packet, uint8_t *frame)
+{
+	tpSirMacFrameCtl fc = (tpSirMacFrameCtl) mb_msg->data;
+	QDF_STATUS qdf_status;
+	uint8_t sme_session_id = 0;
+	tpPESession session;
+	uint16_t auth_ack_status;
+	enum rateid min_rid = RATEID_DEFAULT;
+
+	sme_session_id = mb_msg->session_id;
+	session = pe_find_session_by_sme_session_id(mac_ctx, sme_session_id);
+	if (session == NULL) {
+		pe_err("session not found for given sme session");
+		return;
+	}
+
+	MTRACE(qdf_trace(QDF_MODULE_ID_PE, TRACE_CODE_TX_MGMT,
+			 session->peSessionId, fc->subType));
+
+	mac_ctx->auth_ack_status = LIM_AUTH_ACK_NOT_RCD;
+	min_rid = lim_get_min_session_txrate(session);
+
+	qdf_status = wma_tx_frameWithTxComplete(mac_ctx, packet,
+					 (uint16_t)msg_len,
+					 TXRX_FRM_802_11_MGMT, ANI_TXDIR_TODS,
+					 7, lim_tx_complete, frame,
+					 lim_auth_tx_complete_cnf,
+					 0, sme_session_id, false, 0, min_rid);
+	MTRACE(qdf_trace(QDF_MODULE_ID_PE, TRACE_CODE_TX_COMPLETE,
+		session->peSessionId, qdf_status));
+	if (!QDF_IS_STATUS_SUCCESS(qdf_status)) {
+		pe_err("*** Could not send Auth frame, retCode=%X ***",
+			qdf_status);
+		mac_ctx->auth_ack_status = LIM_AUTH_ACK_RCD_FAILURE;
+		auth_ack_status = SENT_FAIL;
+		lim_diag_event_report(mac_ctx, WLAN_PE_DIAG_AUTH_ACK_EVENT,
+				session, auth_ack_status, eSIR_FAILURE);
+		/* Pkt will be freed up by the callback */
+	}
+}
+
+void lim_send_mgmt_frame_tx(tpAniSirGlobal mac_ctx,
+		uint32_t *msg_buf)
+{
+	struct sir_mgmt_msg *mb_msg = (struct sir_mgmt_msg *)msg_buf;
+	uint32_t msg_len;
+	tpSirMacFrameCtl fc = (tpSirMacFrameCtl) mb_msg->data;
+	uint8_t sme_session_id;
+	QDF_STATUS qdf_status;
+	uint8_t *frame;
+	void *packet;
+
+	msg_len = mb_msg->msg_len - sizeof(*mb_msg);
+	pe_debug("sending fc->type: %d fc->subType: %d",
+		fc->type, fc->subType);
+
+	sme_session_id = mb_msg->session_id;
+
+	qdf_status = cds_packet_alloc((uint16_t) msg_len, (void **)&frame,
+				 (void **)&packet);
+	if (!QDF_IS_STATUS_SUCCESS(qdf_status)) {
+		pe_err("call to bufAlloc failed for AUTH frame");
+		return;
+	}
+
+	qdf_mem_copy(frame, mb_msg->data, msg_len);
+
+	lim_tx_mgmt_frame(mac_ctx, mb_msg, msg_len, packet, frame);
+}

@@ -1,9 +1,6 @@
 /*
  * Copyright (c) 2012-2018 The Linux Foundation. All rights reserved.
  *
- * Previously licensed under the ISC license by Qualcomm Atheros, Inc.
- *
- *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
  * above copyright notice and this permission notice appear in all
@@ -17,12 +14,6 @@
  * PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER
  * TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR
  * PERFORMANCE OF THIS SOFTWARE.
- */
-
-/*
- * This file was originally distributed by Qualcomm Atheros, Inc.
- * under proprietary terms before Copyright ownership was assigned
- * to the Linux Foundation.
  */
 
 /**
@@ -233,6 +224,11 @@ void wlansap_context_put(ptSapContext ctx)
 	for (i = 0; i < SAP_MAX_NUM_SESSION; i++) {
 		if (gp_sap_ctx[i] == ctx) {
 			if (qdf_atomic_dec_and_test(&sap_ctx_ref_count[i])) {
+				if (ctx->channelList) {
+					qdf_mem_free(ctx->channelList);
+					ctx->channelList = NULL;
+					ctx->num_of_channel = 0;
+				}
 				qdf_mem_free(ctx);
 				gp_sap_ctx[i] = NULL;
 				QDF_TRACE(QDF_MODULE_ID_SAP,
@@ -853,11 +849,12 @@ QDF_STATUS wlansap_start_bss(void *pCtx,     /* pwextCtx */
 	pSapCtx->pUsrContext = pUsrContext;
 	pSapCtx->enableOverLapCh = pConfig->enOverLapCh;
 	pSapCtx->acs_cfg = &pConfig->acs_cfg;
+	pSapCtx->secondary_ch = pConfig->sec_ch;
 	pSapCtx->isCacEndNotified = false;
 	pSapCtx->is_chan_change_inprogress = false;
 	pSapCtx->stop_bss_in_progress = false;
 	/* Set the BSSID to your "self MAC Addr" read the mac address
-		from Configuation ITEM received from HDD */
+		from configuration ITEM received from HDD */
 	pSapCtx->csr_roamProfile.BSSIDs.numOfBSSIDs = 1;
 	qdf_mem_copy(pSapCtx->csr_roamProfile.BSSIDs.bssid,
 		     pSapCtx->self_mac_addr, sizeof(struct qdf_mac_addr));
@@ -881,7 +878,7 @@ QDF_STATUS wlansap_start_bss(void *pCtx,     /* pwextCtx */
 	} else {
 		/* If concurrent session is running that is already associated
 		 * then we just follow that sessions country info (whether
-		 * present or not doesn't maater as we have to follow whatever
+		 * present or not doesn't matter as we have to follow whatever
 		 * STA session does) */
 		if ((0 == sme_get_concurrent_operation_channel(hHal)) &&
 		    pConfig->ieee80211d) {
@@ -892,13 +889,6 @@ QDF_STATUS wlansap_start_bss(void *pCtx,     /* pwextCtx */
 	}
 
 	pmac = PMAC_STRUCT(hHal);
-	if (NULL == pmac) {
-		QDF_TRACE(QDF_MODULE_ID_SAP, QDF_TRACE_LEVEL_INFO_HIGH,
-			  "%s: Invalid MAC context from p_cds_gctx",
-			  __func__);
-		qdf_status = QDF_STATUS_E_FAULT;
-		goto fail;
-	}
 	/*
 	 * Copy the DFS Test Mode setting to pmac for
 	 * access in lower layers
@@ -1656,13 +1646,13 @@ static QDF_STATUS wlansap_update_csa_channel_params(ptSapContext sap_context,
 		mac_ctx->sap.SapDfsInfo.new_chanWidth = 0;
 
 	} else {
-
-		if (sap_context->ch_width_orig >= CH_WIDTH_80MHZ)
+		if (sap_context->csr_roamProfile.phyMode ==
+		    eCSR_DOT11_MODE_11ac ||
+		    sap_context->csr_roamProfile.phyMode ==
+		    eCSR_DOT11_MODE_11ac_ONLY)
 			bw = BW80;
-		else if (sap_context->ch_width_orig == CH_WIDTH_40MHZ)
-			bw = BW40_HIGH_PRIMARY;
 		else
-			bw = BW20;
+			bw = BW40_HIGH_PRIMARY;
 
 		for (; bw >= BW20; bw--) {
 			uint16_t op_class;
@@ -2701,6 +2691,21 @@ wlansap_channel_change_request(void *pSapCtx, uint8_t target_channel)
 	mac_ctx = PMAC_STRUCT(hHal);
 	phy_mode = sapContext->csr_roamProfile.phyMode;
 
+	/* Update phy_mode if the target channel is in the other band */
+	if (CDS_IS_CHANNEL_5GHZ(target_channel) &&
+	    ((phy_mode == eCSR_DOT11_MODE_11g) ||
+	    (phy_mode == eCSR_DOT11_MODE_11g_ONLY)))
+		phy_mode = eCSR_DOT11_MODE_11a;
+	else if (CDS_IS_CHANNEL_24GHZ(target_channel) &&
+	    (phy_mode == eCSR_DOT11_MODE_11a))
+		phy_mode = eCSR_DOT11_MODE_11g;
+
+	QDF_TRACE(QDF_MODULE_ID_SAP, QDF_TRACE_LEVEL_DEBUG,
+		  "%s: phy_mode: %d, target_channel: %d new phy_mode: %d",
+		  __func__, sapContext->csr_roamProfile.phyMode,
+		  target_channel, phy_mode);
+	sapContext->csr_roamProfile.phyMode = phy_mode;
+
 	if (sapContext->csr_roamProfile.ChannelInfo.numOfChannels == 0 ||
 	    sapContext->csr_roamProfile.ChannelInfo.ChannelList == NULL) {
 		QDF_TRACE(QDF_MODULE_ID_SAP, QDF_TRACE_LEVEL_ERROR,
@@ -2732,8 +2737,8 @@ wlansap_channel_change_request(void *pSapCtx, uint8_t target_channel)
 				ch_params, &sapContext->csr_roamProfile);
 
 	QDF_TRACE(QDF_MODULE_ID_SAP, QDF_TRACE_LEVEL_INFO,
-		"%s: chan:%d width:%d offset:%d seg0:%d seg1:%d",
-		__func__, sapContext->channel, ch_params->ch_width,
+		"%s: chan:%d phy_mode %d width:%d offset:%d seg0:%d seg1:%d",
+		__func__, sapContext->channel, phy_mode, ch_params->ch_width,
 		ch_params->sec_ch_offset, ch_params->center_freq_seg0,
 		ch_params->center_freq_seg1);
 
@@ -3034,12 +3039,12 @@ wlan_sap_set_channel_avoidance(tHalHandle hal, bool sap_channel_avoidance)
 {
 	tpAniSirGlobal mac_ctx = NULL;
 
-	if (NULL != hal)
+	if (NULL != hal) {
 		mac_ctx = PMAC_STRUCT(hal);
-	if (mac_ctx == NULL || hal == NULL) {
+	} else {
 		QDF_TRACE(QDF_MODULE_ID_SAP,
 			  QDF_TRACE_LEVEL_ERROR,
-			  FL("hal or mac_ctx pointer NULL"));
+			  FL("hal pointer NULL"));
 		return QDF_STATUS_E_FAULT;
 	}
 	mac_ctx->sap.sap_channel_avoidance = sap_channel_avoidance;
@@ -3317,14 +3322,14 @@ void wlansap_extend_to_acs_range(uint8_t *startChannelNum,
 				 (*endChannelNum + ACS_2G_EXTEND) : 14;
 	} else if (*startChannelNum >= 36 && *endChannelNum >= 36) {
 		*bandStartChannel = CHAN_ENUM_36;
-		*bandEndChannel = CHAN_ENUM_165;
+		*bandEndChannel = CHAN_ENUM_173;
 		tmp_startChannelNum = (*startChannelNum - ACS_5G_EXTEND) > 36 ?
 				   (*startChannelNum - ACS_5G_EXTEND) : 36;
 		tmp_endChannelNum = (*endChannelNum + ACS_5G_EXTEND) <= 165 ?
 				 (*endChannelNum + ACS_5G_EXTEND) : 165;
 	} else {
 		*bandStartChannel = CHAN_ENUM_1;
-		*bandEndChannel = CHAN_ENUM_165;
+		*bandEndChannel = CHAN_ENUM_173;
 		tmp_startChannelNum = *startChannelNum > 5 ?
 			(*startChannelNum - ACS_2G_EXTEND) : 1;
 		tmp_endChannelNum = (*endChannelNum + ACS_5G_EXTEND) <= 165 ?

@@ -1,8 +1,5 @@
 /*
- * Copyright (c) 2012-2017 The Linux Foundation. All rights reserved.
- *
- * Previously licensed under the ISC license by Qualcomm Atheros, Inc.
- *
+ * Copyright (c) 2012-2018 The Linux Foundation. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -17,12 +14,6 @@
  * PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER
  * TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR
  * PERFORMANCE OF THIS SOFTWARE.
- */
-
-/*
- * This file was originally distributed by Qualcomm Atheros, Inc.
- * under proprietary terms before Copyright ownership was assigned
- * to the Linux Foundation.
  */
 
 /*
@@ -935,7 +926,12 @@ lim_send_sme_disassoc_ntf(tpAniSirGlobal pMac,
 					pe_err("could not Add STA with assocId: %d",
 					sta_ds->assocId);
 		}
-		failure = true;
+		status = lim_prepare_disconnect_done_ind(pMac, &pMsg,
+				smesessionId, reasonCode, &peerMacAddr[0]);
+		if (!QDF_IS_STATUS_SUCCESS(status)) {
+			pe_err("Failed to prepare message");
+			return;
+		}
 		break;
 
 	case eLIM_HOST_DISASSOC:
@@ -1633,7 +1629,7 @@ lim_send_sme_set_context_rsp(tpAniSirGlobal pMac,
 			     tpPESession psessionEntry, uint8_t smesessionId,
 			     uint16_t smetransactionId)
 {
-	tSirMsgQ mmhMsg;
+	cds_msg_t msg;
 	tSirSmeSetContextRsp *pSirSmeSetContextRsp;
 
 	pSirSmeSetContextRsp = qdf_mem_malloc(sizeof(tSirSmeSetContextRsp));
@@ -1653,15 +1649,15 @@ lim_send_sme_set_context_rsp(tpAniSirGlobal pMac,
 	pSirSmeSetContextRsp->sessionId = smesessionId;
 	pSirSmeSetContextRsp->transactionId = smetransactionId;
 
-	mmhMsg.type = eWNI_SME_SETCONTEXT_RSP;
-	mmhMsg.bodyptr = pSirSmeSetContextRsp;
-	mmhMsg.bodyval = 0;
+	msg.type = eWNI_SME_SETCONTEXT_RSP;
+	msg.bodyptr = pSirSmeSetContextRsp;
+	msg.bodyval = 0;
 	if (NULL == psessionEntry) {
 		MTRACE(mac_trace(pMac, TRACE_CODE_TX_SME_MSG,
-				 NO_SESSION, mmhMsg.type));
+				 NO_SESSION, msg.type));
 	} else {
 		MTRACE(mac_trace(pMac, TRACE_CODE_TX_SME_MSG,
-				 psessionEntry->peSessionId, mmhMsg.type));
+				 psessionEntry->peSessionId, msg.type));
 	}
 
 #ifdef FEATURE_WLAN_DIAG_SUPPORT_LIM    /* FEATURE_WLAN_DIAG_SUPPORT */
@@ -1669,7 +1665,7 @@ lim_send_sme_set_context_rsp(tpAniSirGlobal pMac,
 			      psessionEntry, (uint16_t) resultCode, 0);
 #endif /* FEATURE_WLAN_DIAG_SUPPORT */
 
-	lim_sys_process_mmh_msg_api(pMac, &mmhMsg, ePROT);
+	pMac->lim.sme_msg_callback(pMac, &msg);
 } /*** end lim_send_sme_set_context_rsp() ***/
 
 /**
@@ -2202,7 +2198,7 @@ void lim_handle_csa_offload_msg(tpAniSirGlobal mac_ctx, tpSirMsgQ msg)
 	uint8_t session_id;
 	uint16_t aid = 0;
 	uint16_t chan_space = 0;
-	struct ch_params_s ch_params;
+	struct ch_params_s ch_params = {0};
 
 	tLimWiderBWChannelSwitchInfo *chnl_switch_info = NULL;
 	tLimChannelSwitchInfo *lim_ch_switch = NULL;
@@ -2214,12 +2210,19 @@ void lim_handle_csa_offload_msg(tpAniSirGlobal mac_ctx, tpSirMsgQ msg)
 		return;
 	}
 
+	csa_offload_ind = qdf_mem_malloc(sizeof(tSmeCsaOffloadInd));
+	if (NULL == csa_offload_ind) {
+		pe_err("memalloc fail eWNI_SME_CSA_OFFLOAD_EVENT");
+		goto err;
+	}
+
 	session_entry =
 		pe_find_session_by_bssid(mac_ctx,
 			csa_params->bssId, &session_id);
 	if (!session_entry) {
 		pe_err("Session does not exists for %pM",
 				csa_params->bssId);
+		qdf_mem_free(csa_offload_ind);
 		goto err;
 	}
 
@@ -2228,18 +2231,23 @@ void lim_handle_csa_offload_msg(tpAniSirGlobal mac_ctx, tpSirMsgQ msg)
 
 	if (!sta_ds) {
 		pe_err("sta_ds does not exist");
+		qdf_mem_free(csa_offload_ind);
 		goto err;
 	}
 
 	if (!LIM_IS_STA_ROLE(session_entry)) {
 		pe_debug("Invalid role to handle CSA");
+		qdf_mem_free(csa_offload_ind);
 		goto err;
 	}
 
+#ifdef FEATURE_WLAN_TDLS
 	/*
 	 * on receiving channel switch announcement from AP, delete all
 	 * TDLS peers before leaving BSS and proceed for channel switch
 	 */
+	session_entry->is_tdls_csa = true;
+#endif
 	lim_delete_tdls_peers(mac_ctx, session_entry);
 
 	lim_ch_switch = &session_entry->gLimChannelSwitch;
@@ -2406,15 +2414,25 @@ void lim_handle_csa_offload_msg(tpAniSirGlobal mac_ctx, tpSirMsgQ msg)
 		(session_entry->ch_width ==
 		 session_entry->gLimChannelSwitch.ch_width)) {
 		pe_err("Ignore CSA, no change in ch and bw");
+		qdf_mem_free(csa_offload_ind);
 		goto err;
 	}
 
+	if (CDS_IS_CHANNEL_24GHZ(csa_params->channel) &&
+	    (session_entry->dot11mode == WNI_CFG_DOT11_MODE_11A))
+		session_entry->dot11mode = WNI_CFG_DOT11_MODE_11G;
+	else if (CDS_IS_CHANNEL_5GHZ(csa_params->channel) &&
+		 ((session_entry->dot11mode == WNI_CFG_DOT11_MODE_11G) ||
+		 (session_entry->dot11mode == WNI_CFG_DOT11_MODE_11G_ONLY)))
+		session_entry->dot11mode = WNI_CFG_DOT11_MODE_11A;
+
+	/* Send RSO Stop to FW before triggering the vdev restart for CSA */
+	if (mac_ctx->lim.stop_roaming_callback)
+		mac_ctx->lim.stop_roaming_callback(mac_ctx,
+						   session_entry->smeSessionId,
+						   eCsrDriverDisabled);
+
 	lim_prepare_for11h_channel_switch(mac_ctx, session_entry);
-	csa_offload_ind = qdf_mem_malloc(sizeof(tSmeCsaOffloadInd));
-	if (NULL == csa_offload_ind) {
-		pe_err("memalloc fail eWNI_SME_CSA_OFFLOAD_EVENT");
-		goto err;
-	}
 
 	csa_offload_ind->mesgType = eWNI_SME_CSA_OFFLOAD_EVENT;
 	csa_offload_ind->mesgLen = sizeof(tSmeCsaOffloadInd);
@@ -2557,32 +2575,6 @@ lim_send_sme_dfs_event_notify(tpAniSirGlobal pMac, uint16_t msgType, void *event
 	return;
 }
 
-/*--------------------------------------------------------------------------
-   \brief lim_send_dfs_chan_sw_ie_update()
-   This timer handler updates the channel switch IE in beacon template
-
-   \param pMac - pointer to global adapter context
-   \return     - channel to scan from valid session else zero.
-   \sa
-   --------------------------------------------------------------------------*/
-static void
-lim_send_dfs_chan_sw_ie_update(tpAniSirGlobal pMac, tpPESession psessionEntry)
-{
-
-	/* Update the beacon template and send to FW */
-	if (sch_set_fixed_beacon_fields(pMac, psessionEntry) != eSIR_SUCCESS) {
-		pe_err("Unable to set CSA IE in beacon");
-		return;
-	}
-
-	/* Send update beacon template message */
-	lim_send_beacon_ind(pMac, psessionEntry);
-	pe_debug("Updated CSA IE, IE COUNT: %d",
-		       psessionEntry->gLimChannelSwitch.switchCount);
-
-	return;
-}
-
 /** -----------------------------------------------------------------
    \brief lim_send_sme_ap_channel_switch_resp() - sends
    eWNI_SME_CHANNEL_CHANGE_RSP
@@ -2663,107 +2655,54 @@ lim_send_sme_ap_channel_switch_resp(tpAniSirGlobal pMac,
 	return;
 }
 
-/** -----------------------------------------------------------------
-   \brief lim_process_beacon_tx_success_ind() - This function is used
-   explicitely to handle successful beacon transmission indication
-   from the FW. This is a generic event generated by the FW afer the
-   first beacon is sent out after the beacon template update by the
-   host
-   \param pMac - global mac structure
-   \param psessionEntry - session info
-   \return none
-   \sa
-   ----------------------------------------------------------------- */
-void
-lim_process_beacon_tx_success_ind(tpAniSirGlobal pMac, uint16_t msgType, void *event)
+void lim_process_beacon_tx_success_ind(tpAniSirGlobal mac_ctx,
+				uint16_t msg_type, void *event)
 {
-	/* Currently, this event is used only for DFS channel switch announcement
-	 * IE update in the template. If required to be used for other IE updates
-	 * add appropriate code by introducing a state variable
-	 */
-	tpPESession psessionEntry;
-	tSirMsgQ mmhMsg;
-	tSirSmeCSAIeTxCompleteRsp *pChanSwTxResponse;
-	struct sir_beacon_tx_complete_rsp *beacon_tx_comp_rsp_ptr;
-	uint8_t length = sizeof(tSirSmeCSAIeTxCompleteRsp);
-	tpSirFirstBeaconTxCompleteInd pBcnTxInd =
+	tpPESession session;
+	cds_msg_t msg = {0};
+	struct sir_beacon_tx_complete_rsp *bcn_tx_comp_rsp;
+	tpSirFirstBeaconTxCompleteInd bcn_ind =
 		(tSirFirstBeaconTxCompleteInd *) event;
-	uint8_t ch, ch_width;
+	QDF_STATUS status;
 
-	psessionEntry = pe_find_session_by_bss_idx(pMac, pBcnTxInd->bssIdx);
-	if (psessionEntry == NULL) {
-		pe_err("Session Does not exist for given sessionID");
+	session = pe_find_session_by_bss_idx(mac_ctx, bcn_ind->bssIdx);
+	if (session == NULL) {
+		pe_err("Session does not exist for given sessionID");
 		return;
 	}
 
-	pe_debug("role: %d swIe: %d opIe: %d",
-		GET_LIM_SYSTEM_ROLE(psessionEntry),
-		psessionEntry->dfsIncludeChanSwIe,
-		psessionEntry->gLimOperatingMode.present);
+	pe_debug("role: %d opIe: %d dfsIncludeChanSwIe:%d Switch count:%d",
+		 GET_LIM_SYSTEM_ROLE(session),
+		 session->gLimOperatingMode.present,
+		 session->dfsIncludeChanSwIe,
+		 session->gLimChannelSwitch.switchCount);
 
-	if (LIM_IS_AP_ROLE(psessionEntry) &&
-	    true == psessionEntry->dfsIncludeChanSwIe) {
-		/* Send only 5 beacons with CSA IE Set in when a radar is detected */
-		if (psessionEntry->gLimChannelSwitch.switchCount > 0) {
-			/*
-			 * Send the next beacon with updated CSA IE count
-			 */
-			lim_send_dfs_chan_sw_ie_update(pMac, psessionEntry);
+	if (!LIM_IS_AP_ROLE(session))
+		return;
 
-			ch = psessionEntry->gLimChannelSwitch.primaryChannel;
-			ch_width = psessionEntry->gLimChannelSwitch.ch_width;
-			if (pMac->sap.SapDfsInfo.dfs_beacon_tx_enhanced)
-				/* Send Action frame after updating beacon */
-				lim_send_chan_switch_action_frame(pMac,
-					ch, ch_width, psessionEntry);
+	if (session->dfsIncludeChanSwIe &&
+	    (session->gLimChannelSwitch.switchCount ==
+	    mac_ctx->sap.SapDfsInfo.sap_ch_switch_beacon_cnt))
+		lim_process_ap_ecsa_timeout(session);
 
-			/* Decrement the IE count */
-			psessionEntry->gLimChannelSwitch.switchCount--;
-		} else {
-			/* Done with CSA IE update, send response back to SME */
-			psessionEntry->gLimChannelSwitch.switchCount = 0;
-			if (pMac->sap.SapDfsInfo.disable_dfs_ch_switch == false)
-				psessionEntry->gLimChannelSwitch.switchMode = 0;
-			psessionEntry->dfsIncludeChanSwIe = false;
-			psessionEntry->dfsIncludeChanWrapperIe = false;
-
-			pChanSwTxResponse = (tSirSmeCSAIeTxCompleteRsp *)
-					    qdf_mem_malloc(length);
-
-			if (NULL == pChanSwTxResponse) {
-				pe_err("AllocateMemory failed for tSirSmeCSAIeTxCompleteRsp");
-				return;
-			}
-
-			pChanSwTxResponse->sessionId =
-				psessionEntry->smeSessionId;
-			pChanSwTxResponse->chanSwIeTxStatus =
-				QDF_STATUS_SUCCESS;
-
-			mmhMsg.type = eWNI_SME_DFS_CSAIE_TX_COMPLETE_IND;
-			mmhMsg.bodyptr = pChanSwTxResponse;
-			mmhMsg.bodyval = 0;
-			lim_sys_process_mmh_msg_api(pMac, &mmhMsg, ePROT);
-		}
-	}
-
-	if (LIM_IS_AP_ROLE(psessionEntry) &&
-		psessionEntry->gLimOperatingMode.present) {
+	if (session->gLimOperatingMode.present) {
 		/* Done with nss update, send response back to SME */
-		psessionEntry->gLimOperatingMode.present = 0;
-		beacon_tx_comp_rsp_ptr = (struct sir_beacon_tx_complete_rsp *)
-				qdf_mem_malloc(sizeof(*beacon_tx_comp_rsp_ptr));
-		if (NULL == beacon_tx_comp_rsp_ptr) {
-			pe_err("AllocateMemory failed for beacon_tx_comp_rsp_ptr");
+		session->gLimOperatingMode.present = 0;
+		bcn_tx_comp_rsp = (struct sir_beacon_tx_complete_rsp *)
+			qdf_mem_malloc(sizeof(*bcn_tx_comp_rsp));
+		if (NULL == bcn_tx_comp_rsp) {
+			pe_err("AllocateMemory failed for bcn_tx_comp_rsp");
 			return;
 		}
-		beacon_tx_comp_rsp_ptr->session_id =
-			psessionEntry->smeSessionId;
-		beacon_tx_comp_rsp_ptr->tx_status = QDF_STATUS_SUCCESS;
-		mmhMsg.type = eWNI_SME_NSS_UPDATE_RSP;
-		mmhMsg.bodyptr = beacon_tx_comp_rsp_ptr;
-		mmhMsg.bodyval = 0;
-		lim_sys_process_mmh_msg_api(pMac, &mmhMsg, ePROT);
+		bcn_tx_comp_rsp->session_id = session->smeSessionId;
+		bcn_tx_comp_rsp->tx_status = QDF_STATUS_SUCCESS;
+		msg.type = eWNI_SME_NSS_UPDATE_RSP;
+		msg.bodyptr = bcn_tx_comp_rsp;
+
+		status = cds_mq_post_message(QDF_MODULE_ID_SME, &msg);
+		if (QDF_IS_STATUS_ERROR(status)) {
+			sme_err("Failed to post eWNI_SME_NSS_UPDATE_RSP");
+			qdf_mem_free(bcn_tx_comp_rsp);
+		}
 	}
-	return;
 }

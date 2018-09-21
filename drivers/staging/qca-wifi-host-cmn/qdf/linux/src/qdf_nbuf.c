@@ -1,9 +1,6 @@
 /*
  * Copyright (c) 2014-2018 The Linux Foundation. All rights reserved.
  *
- * Previously licensed under the ISC license by Qualcomm Atheros, Inc.
- *
- *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
  * above copyright notice and this permission notice appear in all
@@ -17,12 +14,6 @@
  * PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER
  * TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR
  * PERFORMANCE OF THIS SOFTWARE.
- */
-
-/*
- * This file was originally distributed by Qualcomm Atheros, Inc.
- * under proprietary terms before Copyright ownership was assigned
- * to the Linux Foundation.
  */
 
 /**
@@ -295,8 +286,18 @@ struct sk_buff *__qdf_nbuf_alloc(qdf_device_t osdev, size_t size, int reserve,
 	if (align)
 		size += (align - 1);
 
-	if (in_interrupt() || irqs_disabled() || in_atomic())
+	if (in_interrupt() || irqs_disabled() || in_atomic()) {
 		flags = GFP_ATOMIC;
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 4, 0)
+		/*
+		 * Observed that kcompactd burns out CPU to make order-3 page.
+		 *__netdev_alloc_skb has 4k page fallback option just in case of
+		 * failing high order page allocation so we don't need to be
+		 * hard. Make kcompactd rest in piece.
+		 */
+		flags = flags & ~__GFP_KSWAPD_RECLAIM;
+#endif
+	}
 
 	skb = __netdev_alloc_skb(NULL, size, flags);
 
@@ -306,7 +307,8 @@ struct sk_buff *__qdf_nbuf_alloc(qdf_device_t osdev, size_t size, int reserve,
 	skb = pld_nbuf_pre_alloc(size);
 
 	if (!skb) {
-		pr_info("ERROR:NBUF alloc failed\n");
+		pr_err_ratelimited("ERROR:NBUF alloc failed, size = %zu\n",
+				   size);
 		__qdf_nbuf_start_replenish_timer();
 		return NULL;
 	}
@@ -1021,9 +1023,6 @@ __qdf_nbuf_data_get_icmp_subtype(uint8_t *data)
 	subtype = (uint8_t)(*(uint8_t *)
 			(data + ICMP_SUBTYPE_OFFSET));
 
-	QDF_TRACE(QDF_MODULE_ID_QDF, QDF_TRACE_LEVEL_DEBUG,
-		"ICMP proto type: 0x%02x", subtype);
-
 	switch (subtype) {
 	case ICMP_REQUEST:
 		proto_subtype = QDF_PROTO_ICMP_REQ;
@@ -1055,9 +1054,6 @@ __qdf_nbuf_data_get_icmpv6_subtype(uint8_t *data)
 
 	subtype = (uint8_t)(*(uint8_t *)
 			(data + ICMPV6_SUBTYPE_OFFSET));
-
-	QDF_TRACE(QDF_MODULE_ID_QDF, QDF_TRACE_LEVEL_DEBUG,
-		"ICMPv6 proto type: 0x%02x", subtype);
 
 	switch (subtype) {
 	case ICMPV6_REQUEST:
@@ -2339,9 +2335,20 @@ void qdf_net_buf_debug_release_skb(qdf_nbuf_t net_buf)
 		qdf_nbuf_t next;
 
 		next = qdf_nbuf_queue_next(ext_list);
+
+		if (qdf_nbuf_is_tso(ext_list) &&
+			qdf_nbuf_get_users(ext_list) > 1) {
+			ext_list = next;
+			continue;
+		}
+
 		qdf_net_buf_debug_delete_node(ext_list);
 		ext_list = next;
 	}
+
+	if (qdf_nbuf_is_tso(net_buf) && qdf_nbuf_get_users(net_buf) > 1)
+		return;
+
 	qdf_net_buf_debug_delete_node(net_buf);
 }
 qdf_export_symbol(qdf_net_buf_debug_release_skb);

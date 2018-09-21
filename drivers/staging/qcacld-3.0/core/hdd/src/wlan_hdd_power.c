@@ -1,9 +1,6 @@
 /*
  * Copyright (c) 2012-2018 The Linux Foundation. All rights reserved.
  *
- * Previously licensed under the ISC license by Qualcomm Atheros, Inc.
- *
- *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
  * above copyright notice and this permission notice appear in all
@@ -17,12 +14,6 @@
  * PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER
  * TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR
  * PERFORMANCE OF THIS SOFTWARE.
- */
-
-/*
- * This file was originally distributed by Qualcomm Atheros, Inc.
- * under proprietary terms before Copyright ownership was assigned
- * to the Linux Foundation.
  */
 
 /**
@@ -298,6 +289,7 @@ int wlan_hdd_ipv6_changed(struct notifier_block *nb,
  * @idev: pointer to net device
  * @ipv6addr: destination array to fill IPv6 addresses
  * @ipv6addr_type: IPv6 Address type
+ * @scope_array: IPv6 Address scope
  * @count: number of IPv6 addresses
  *
  * This is the IPv6 utility function to populate unicast addresses.
@@ -306,7 +298,9 @@ int wlan_hdd_ipv6_changed(struct notifier_block *nb,
  */
 static int hdd_fill_ipv6_uc_addr(struct inet6_dev *idev,
 				uint8_t ipv6_uc_addr[][SIR_MAC_IPV6_ADDR_LEN],
-				uint8_t *ipv6addr_type, uint32_t *count)
+				uint8_t *ipv6addr_type,
+				enum sir_ipv6_addr_scope *scope_array,
+				uint32_t *count)
 {
 	struct inet6_ifaddr *ifa;
 	struct list_head *p;
@@ -328,6 +322,7 @@ static int hdd_fill_ipv6_uc_addr(struct inet6_dev *idev,
 			qdf_mem_copy(ipv6_uc_addr[*count], &ifa->addr.s6_addr,
 				sizeof(ifa->addr.s6_addr));
 			ipv6addr_type[*count] = SIR_IPV6_ADDR_UC_TYPE;
+			scope_array[*count] = sir_get_ipv6_addr_scope(scope);
 			hdd_debug("Index %d scope = %s UC-Address: %pI6",
 				*count, (scope == IPV6_ADDR_SCOPE_LINKLOCAL) ?
 				"LINK LOCAL" : "GLOBAL", ipv6_uc_addr[*count]);
@@ -347,6 +342,7 @@ static int hdd_fill_ipv6_uc_addr(struct inet6_dev *idev,
  * @idev: pointer to net device
  * @ipv6addr: destination array to fill IPv6 addresses
  * @ipv6addr_type: IPv6 Address type
+ * @scope_array: IPv6 Address scope
  * @count: number of IPv6 addresses
  *
  * This is the IPv6 utility function to populate anycast addresses.
@@ -355,7 +351,9 @@ static int hdd_fill_ipv6_uc_addr(struct inet6_dev *idev,
  */
 static int hdd_fill_ipv6_ac_addr(struct inet6_dev *idev,
 				uint8_t ipv6_ac_addr[][SIR_MAC_IPV6_ADDR_LEN],
-				uint8_t *ipv6addr_type, uint32_t *count)
+				uint8_t *ipv6addr_type,
+				enum sir_ipv6_addr_scope *scope_array,
+				uint32_t *count)
 {
 	struct ifacaddr6 *ifaca;
 	uint32_t scope;
@@ -374,6 +372,7 @@ static int hdd_fill_ipv6_ac_addr(struct inet6_dev *idev,
 			qdf_mem_copy(ipv6_ac_addr[*count], &ifaca->aca_addr,
 				sizeof(ifaca->aca_addr));
 			ipv6addr_type[*count] = SIR_IPV6_ADDR_AC_TYPE;
+			scope_array[*count] = sir_get_ipv6_addr_scope(scope);
 			hdd_debug("Index %d scope = %s AC-Address: %pI6",
 				*count, (scope == IPV6_ADDR_SCOPE_LINKLOCAL) ?
 				"LINK LOCAL" : "GLOBAL", ipv6_ac_addr[*count]);
@@ -399,6 +398,10 @@ static void hdd_disable_ns_offload(hdd_adapter_t *adapter)
 	tSirHostOffloadReq offloadReq;
 	QDF_STATUS status;
 
+	qdf_mutex_acquire(&adapter->ns_offload_info_lock);
+	adapter->ns_offload_info.offload = false;
+	qdf_mutex_release(&adapter->ns_offload_info_lock);
+
 	qdf_mem_zero((void *)&offloadReq, sizeof(tSirHostOffloadReq));
 	hdd_wlan_offload_event(SIR_IPV6_NS_OFFLOAD, SIR_OFFLOAD_DISABLE);
 	offloadReq.enableOrDisable = SIR_OFFLOAD_DISABLE;
@@ -423,6 +426,7 @@ static void hdd_enable_ns_offload(hdd_adapter_t *adapter)
 	uint8_t ipv6_addr[SIR_MAC_NUM_TARGET_IPV6_NS_OFFLOAD_NA]
 					[SIR_MAC_IPV6_ADDR_LEN] = { {0,} };
 	uint8_t ipv6_addr_type[SIR_MAC_NUM_TARGET_IPV6_NS_OFFLOAD_NA] = { 0 };
+	enum sir_ipv6_addr_scope scope[SIR_MAC_NUM_TARGET_IPV6_NS_OFFLOAD_NA];
 	tSirHostOffloadReq offloadReq;
 	QDF_STATUS status;
 	uint32_t count = 0;
@@ -434,8 +438,11 @@ static void hdd_enable_ns_offload(hdd_adapter_t *adapter)
 		return;
 	}
 
+	qdf_mem_zero(scope, sizeof(scope));
+
 	/* Unicast Addresses */
-	err = hdd_fill_ipv6_uc_addr(in6_dev, ipv6_addr, ipv6_addr_type, &count);
+	err = hdd_fill_ipv6_uc_addr(in6_dev, ipv6_addr, ipv6_addr_type, scope,
+				    &count);
 	if (err) {
 		hdd_disable_ns_offload(adapter);
 		hdd_debug("Max supported addresses: disabling NS offload");
@@ -443,7 +450,8 @@ static void hdd_enable_ns_offload(hdd_adapter_t *adapter)
 	}
 
 	/* Anycast Addresses */
-	err = hdd_fill_ipv6_ac_addr(in6_dev, ipv6_addr, ipv6_addr_type, &count);
+	err = hdd_fill_ipv6_ac_addr(in6_dev, ipv6_addr, ipv6_addr_type, scope,
+				    &count);
 	if (err) {
 		hdd_disable_ns_offload(adapter);
 		hdd_debug("Max supported addresses: disabling NS offload");
@@ -480,6 +488,7 @@ static void hdd_enable_ns_offload(hdd_adapter_t *adapter)
 			SIR_IPV6_ADDR_VALID;
 		offloadReq.nsOffloadInfo.target_ipv6_addr_ac_type[i] =
 			ipv6_addr_type[i];
+		offloadReq.nsOffloadInfo.scope[i] = scope[i];
 
 		qdf_mem_copy(&offloadReq.params.hostIpv6Addr,
 			&offloadReq.nsOffloadInfo.targetIPv6Addr[i],
@@ -499,6 +508,12 @@ static void hdd_enable_ns_offload(hdd_adapter_t *adapter)
 
 	/* set number of ns offload address count */
 	offloadReq.num_ns_offload_count = count;
+
+	qdf_mutex_acquire(&adapter->ns_offload_info_lock);
+	adapter->ns_offload_info.offload = true;
+	adapter->ns_offload_info.num_ns_offload_count = count;
+	adapter->ns_offload_info.nsOffloadInfo = offloadReq.nsOffloadInfo;
+	qdf_mutex_release(&adapter->ns_offload_info_lock);
 
 	/* Configure the Firmware with this */
 	status = sme_set_host_offload(WLAN_HDD_GET_HAL_CTX(adapter),
@@ -1030,6 +1045,13 @@ QDF_STATUS hdd_conf_arp_offload(hdd_adapter_t *pAdapter, bool fenable)
 				hdd_err("Failed to enable HostOffload feature");
 				return QDF_STATUS_E_FAILURE;
 			}
+
+			qdf_mutex_acquire(&pAdapter->arp_offload_info_lock);
+			pAdapter->arp_offload_info.offload = fenable;
+			qdf_mem_copy(pAdapter->arp_offload_info.ipv4,
+				     offLoadRequest.params.hostIpv4Addr,
+				     SIR_IPV4_ADDR_LEN);
+			qdf_mutex_release(&pAdapter->arp_offload_info_lock);
 		} else {
 			hdd_debug("IP Address is not assigned");
 		}
@@ -1049,6 +1071,11 @@ QDF_STATUS hdd_conf_arp_offload(hdd_adapter_t *pAdapter, bool fenable)
 		hdd_err("Failure to disable host offload feature");
 		return QDF_STATUS_E_FAILURE;
 	}
+
+	qdf_mutex_acquire(&pAdapter->arp_offload_info_lock);
+	pAdapter->arp_offload_info.offload = fenable;
+	qdf_mutex_release(&pAdapter->arp_offload_info_lock);
+
 	return QDF_STATUS_SUCCESS;
 }
 
@@ -1288,7 +1315,8 @@ hdd_suspend_wlan(void (*callback)(void *callbackContext, bool suspended),
 		pAdapter = pAdapterNode->pAdapter;
 
 		/* stop all TX queues before suspend */
-		hdd_info("Disabling queues");
+		hdd_info("Disabling queues for dev mode %s",
+			 hdd_device_mode_to_string(pAdapter->device_mode));
 		wlan_hdd_netif_queue_control(pAdapter,
 					     WLAN_STOP_ALL_NETIF_QUEUE,
 					     WLAN_CONTROL_PATH);
@@ -1348,7 +1376,8 @@ static void hdd_resume_wlan(void)
 		pAdapter = pAdapterNode->pAdapter;
 
 		/* wake the tx queues */
-		hdd_info("Enabling queues");
+		hdd_info("Enabling queues for dev mode %s",
+			 hdd_device_mode_to_string(pAdapter->device_mode));
 		wlan_hdd_netif_queue_control(pAdapter,
 					WLAN_WAKE_ALL_NETIF_QUEUE,
 					WLAN_CONTROL_PATH);
@@ -1493,7 +1522,7 @@ QDF_STATUS hdd_wlan_shutdown(void)
 
 	qdf_mc_timer_stop(&pHddCtx->tdls_source_timer);
 
-	hdd_bus_bandwidth_destroy(pHddCtx);
+	hdd_bus_bw_compute_timer_stop(pHddCtx);
 
 	hdd_wlan_stop_modules(pHddCtx, false);
 
@@ -1558,6 +1587,29 @@ static void hdd_send_default_scan_ies(hdd_context_t *hdd_ctx)
 	}
 }
 
+void hdd_is_interface_down_during_ssr(hdd_context_t *hdd_ctx)
+{
+	hdd_adapter_t *adapter = NULL;
+	hdd_adapter_list_node_t *adapternode = NULL, *pnext = NULL;
+	QDF_STATUS status;
+
+	ENTER();
+
+	status = hdd_get_front_adapter(hdd_ctx, &adapternode);
+	while (NULL != adapternode && QDF_STATUS_SUCCESS == status) {
+		adapter = adapternode->pAdapter;
+		if (test_bit(DOWN_DURING_SSR, &adapter->event_flags)) {
+			clear_bit(DOWN_DURING_SSR, &adapter->event_flags);
+			hdd_stop_adapter(hdd_ctx, adapter, true);
+			clear_bit(DEVICE_IFACE_OPENED, &adapter->event_flags);
+		}
+		status = hdd_get_next_adapter(hdd_ctx, adapternode, &pnext);
+		adapternode = pnext;
+	}
+
+	EXIT();
+}
+
 /**
  * hdd_wlan_re_init() - HDD SSR re-init function
  *
@@ -1599,16 +1651,13 @@ QDF_STATUS hdd_wlan_re_init(void)
 	if (pHddCtx->config->enable_dp_trace)
 		hdd_dp_trace_init(pHddCtx->config);
 
-	hdd_bus_bandwidth_init(pHddCtx);
-
-
 	ret = hdd_wlan_start_modules(pHddCtx, pAdapter, true);
 	if (ret) {
 		hdd_err("Failed to start wlan after error");
 		goto err_re_init;
 	}
 
-	hdd_wlan_get_version(pHddCtx, NULL, NULL);
+	hdd_update_hw_sw_info(pHddCtx);
 
 	wlan_hdd_send_svc_nlink_msg(pHddCtx->radio_index,
 				WLAN_SVC_FW_CRASHED_IND, NULL, 0);
@@ -1644,7 +1693,7 @@ err_re_init:
 success:
 	if (pHddCtx->config->sap_internal_restart)
 		hdd_ssr_restart_sap(pHddCtx);
-
+	hdd_is_interface_down_during_ssr(pHddCtx);
 	hdd_wlan_ssr_reinit_event();
 	return QDF_STATUS_SUCCESS;
 }
@@ -1942,6 +1991,13 @@ static int __wlan_hdd_cfg80211_suspend_wlan(struct wiphy *wiphy,
 		return rc;
 
 	mutex_lock(&pHddCtx->iface_change_lock);
+
+	if (pHddCtx->driver_status == DRIVER_MODULES_OPENED) {
+		mutex_unlock(&pHddCtx->iface_change_lock);
+		hdd_err("Driver open state,  can't suspend");
+		return -EAGAIN;
+	}
+
 	if (pHddCtx->driver_status != DRIVER_MODULES_ENABLED) {
 		mutex_unlock(&pHddCtx->iface_change_lock);
 		hdd_debug("Driver Modules not Enabled ");
@@ -1958,7 +2014,7 @@ static int __wlan_hdd_cfg80211_suspend_wlan(struct wiphy *wiphy,
 		pAdapter = pAdapterNode->pAdapter;
 
 		if (wlan_hdd_validate_session_id(pAdapter->sessionId)) {
-			hdd_err("invalid session id: %d", pAdapter->sessionId);
+			hdd_debug("invalid session id: %d", pAdapter->sessionId);
 			goto next_adapter;
 		}
 
@@ -2153,7 +2209,7 @@ static void hdd_stop_dhcp_ind(hdd_adapter_t *adapter)
 			  adapter->macAddressCurrent.bytes,
 			  adapter->sessionId);
 	hdd_allow_suspend(WIFI_POWER_EVENT_WAKELOCK_DHCP);
-	qdf_runtime_pm_allow_suspend(&adapter->connect_rpm_ctx.connect);
+	qdf_runtime_pm_allow_suspend(&hdd_ctx->runtime_context.connect);
 }
 
 /**
@@ -2170,7 +2226,7 @@ static void hdd_start_dhcp_ind(hdd_adapter_t *adapter)
 	hdd_context_t *hdd_ctx = WLAN_HDD_GET_CTX(adapter);
 
 	hdd_debug("DHCP start indicated through power save");
-	qdf_runtime_pm_prevent_suspend(&adapter->connect_rpm_ctx.connect);
+	qdf_runtime_pm_prevent_suspend(&hdd_ctx->runtime_context.connect);
 	hdd_prevent_suspend_timeout(HDD_WAKELOCK_TIMEOUT_CONNECT,
 				    WIFI_POWER_EVENT_WAKELOCK_DHCP);
 	sme_dhcp_start_ind(hdd_ctx->hHal, adapter->device_mode,

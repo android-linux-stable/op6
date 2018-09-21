@@ -1,8 +1,5 @@
 /*
- * Copyright (c) 2012-2017 The Linux Foundation. All rights reserved.
- *
- * Previously licensed under the ISC license by Qualcomm Atheros, Inc.
- *
+ * Copyright (c) 2012-2018 The Linux Foundation. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -17,12 +14,6 @@
  * PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER
  * TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR
  * PERFORMANCE OF THIS SOFTWARE.
- */
-
-/*
- * This file was originally distributed by Qualcomm Atheros, Inc.
- * under proprietary terms before Copyright ownership was assigned
- * to the Linux Foundation.
  */
 
 /*
@@ -202,6 +193,20 @@ typedef struct sSirMbMsgP2p {
 	 */
 	uint32_t data[1];
 } tSirMbMsgP2p, *tpSirMbMsgP2p;
+
+/**
+ * struct sir_mgmt_msg - Structure used to send auth frame from CSR to LIM
+ * @type: Message type
+ * @msg_len: Message length
+ * @session_id: session id
+ * @data: Pointer to data tobe transmitted
+ */
+struct sir_mgmt_msg {
+	uint16_t type;
+	uint16_t msg_len;
+	uint8_t session_id;
+	uint8_t *data;
+};
 
 /* ******************************************* *
 *                                             *
@@ -626,8 +631,8 @@ typedef struct sSirMbMsgP2p {
 #define SIR_HAL_REMOVE_BCN_FILTER_CMDID     (SIR_HAL_ITC_MSG_TYPES_BEGIN + 340)
 
 
-#define SIR_HAL_BPF_GET_CAPABILITIES_REQ    (SIR_HAL_ITC_MSG_TYPES_BEGIN + 341)
-#define SIR_HAL_BPF_SET_INSTRUCTIONS_REQ    (SIR_HAL_ITC_MSG_TYPES_BEGIN + 342)
+#define SIR_HAL_APF_GET_CAPABILITIES_REQ    (SIR_HAL_ITC_MSG_TYPES_BEGIN + 341)
+#define SIR_HAL_APF_SET_INSTRUCTIONS_REQ    (SIR_HAL_ITC_MSG_TYPES_BEGIN + 342)
 
 #define SIR_HAL_SET_WISA_PARAMS             (SIR_HAL_ITC_MSG_TYPES_BEGIN + 343)
 #define SIR_HAL_SET_ADAPT_DWELLTIME_PARAMS  (SIR_HAL_ITC_MSG_TYPES_BEGIN + 344)
@@ -697,6 +702,10 @@ typedef struct sSirMbMsgP2p {
 
 #define SIR_HAL_SET_DEL_PMKID_CACHE         (SIR_HAL_ITC_MSG_TYPES_BEGIN + 389)
 #define SIR_HAL_HLP_IE_INFO                 (SIR_HAL_ITC_MSG_TYPES_BEGIN + 390)
+#define SIR_HAL_INVOKE_NEIGHBOR_REPORT      (SIR_HAL_ITC_MSG_TYPES_BEGIN + 391)
+#define SIR_HAL_NDP_SCH_UPDATE_IND          (SIR_HAL_ITC_MSG_TYPES_BEGIN + 392)
+#define SIR_HAL_GET_ROAM_SCAN_STATS         (SIR_HAL_ITC_MSG_TYPES_BEGIN + 393)
+
 #define SIR_HAL_MSG_TYPES_END               (SIR_HAL_MSG_TYPES_BEGIN + 0x1FF)
 /* CFG message types */
 #define SIR_CFG_MSG_TYPES_BEGIN        (SIR_CFG_MODULE_ID << 8)
@@ -776,6 +785,8 @@ typedef struct sSirMbMsgP2p {
 #define SIR_LIM_CONVERT_ACTIVE_CHANNEL_TO_PASSIVE \
 					 (SIR_LIM_TIMEOUT_MSG_START + 0x2C)
 #define SIR_LIM_AUTH_RETRY_TIMEOUT     (SIR_LIM_TIMEOUT_MSG_START + 0x2D)
+
+#define SIR_LIM_AUTH_SAE_TIMEOUT     (SIR_LIM_TIMEOUT_MSG_START + 0x2E)
 
 #define SIR_LIM_MSG_TYPES_END            (SIR_LIM_MSG_TYPES_BEGIN+0xFF)
 

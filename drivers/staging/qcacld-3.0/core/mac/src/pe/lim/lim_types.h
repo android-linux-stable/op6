@@ -1,9 +1,6 @@
 /*
  * Copyright (c) 2012-2018 The Linux Foundation. All rights reserved.
  *
- * Previously licensed under the ISC license by Qualcomm Atheros, Inc.
- *
- *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
  * above copyright notice and this permission notice appear in all
@@ -17,12 +14,6 @@
  * PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER
  * TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR
  * PERFORMANCE OF THIS SOFTWARE.
- */
-
-/*
- * This file was originally distributed by Qualcomm Atheros, Inc.
- * under proprietary terms before Copyright ownership was assigned
- * to the Linux Foundation.
  */
 
 /*
@@ -496,10 +487,9 @@ void lim_perform_disassoc(tpAniSirGlobal mac_ctx, int32_t frame_rssi,
 void lim_disassoc_tdls_peers(tpAniSirGlobal mac_ctx,
 				    tpPESession pe_session, tSirMacAddr addr);
 #else
-void lim_disassoc_tdls_peers(tpAniSirGlobal mac_ctx,
+static inline void lim_disassoc_tdls_peers(tpAniSirGlobal mac_ctx,
 				    tpPESession pe_session, tSirMacAddr addr)
 {
-	return;
 }
 #endif
 void lim_process_deauth_frame(tpAniSirGlobal, uint8_t *, tpPESession);
@@ -523,7 +513,7 @@ void lim_populate_mac_header(tpAniSirGlobal, uint8_t *, uint8_t, uint8_t,
 				      tSirMacAddr, tSirMacAddr);
 tSirRetStatus lim_send_probe_req_mgmt_frame(tpAniSirGlobal, tSirMacSSid *,
 					    tSirMacAddr, uint8_t, tSirMacAddr,
-					    uint32_t, uint32_t, uint8_t *);
+					    uint32_t, uint16_t *, uint8_t *);
 void lim_send_probe_rsp_mgmt_frame(tpAniSirGlobal, tSirMacAddr, tpAniSSID, short,
 				   uint8_t, tpPESession, uint8_t);
 void lim_send_auth_mgmt_frame(tpAniSirGlobal, tSirMacAuthFrameBody *, tSirMacAddr,
@@ -588,11 +578,28 @@ tSirRetStatus lim_send_neighbor_report_request_frame(tpAniSirGlobal,
 						     tSirMacAddr, tpPESession);
 tSirRetStatus lim_send_link_report_action_frame(tpAniSirGlobal, tpSirMacLinkReport,
 						tSirMacAddr, tpPESession);
-tSirRetStatus lim_send_radio_measure_report_action_frame(tpAniSirGlobal, uint8_t,
-							 uint8_t,
-							 tpSirMacRadioMeasureReport,
-							 tSirMacAddr, tpPESession);
 
+/**
+ * lim_send_radio_measure_report_action_frame - Send RRM report action frame
+ * @pMac: pointer to global MAC context
+ * @dialog_token: Dialog token to be used in the action frame
+ * @num_report: number of reports in pRRMReport
+ * @last_beacon_report_params: Last Beacon Report indication params
+ * @pRRMReport: Pointer to the RRM report structure
+ * @peer: MAC address of the peer
+ * @psessionEntry: Pointer to the PE session entry
+ *
+ * Return: Ret Status
+ */
+tSirRetStatus
+lim_send_radio_measure_report_action_frame(tpAniSirGlobal pMac,
+				uint8_t dialog_token,
+				uint8_t num_report,
+				struct rrm_beacon_report_last_beacon_params
+				*last_beacon_report_params,
+				tpSirMacRadioMeasureReport pRRMReport,
+				tSirMacAddr peer,
+				tpPESession psessionEntry);
 
 #ifdef FEATURE_WLAN_TDLS
 void lim_init_tdls_data(tpAniSirGlobal, tpPESession);
@@ -1007,5 +1014,15 @@ void lim_process_auth_failure_timeout(tpAniSirGlobal mac_ctx);
  */
 void lim_process_assoc_failure_timeout(tpAniSirGlobal mac_ctx,
 						     uint32_t msg_type);
+
+/**
+ * lim_send_mgmt_frame_tx() - Sends mgmt frame
+ * @mac_ctx Pointer to Global MAC structure
+ * @msg: Received message info
+ *
+ * Return: None
+ */
+void lim_send_mgmt_frame_tx(tpAniSirGlobal mac_ctx,
+		uint32_t *msg_buf);
 
 #endif /* __LIM_TYPES_H */

@@ -1,9 +1,6 @@
 /*
  * Copyright (c) 2014-2018 The Linux Foundation. All rights reserved.
  *
- * Previously licensed under the ISC license by Qualcomm Atheros, Inc.
- *
- *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
  * above copyright notice and this permission notice appear in all
@@ -19,11 +16,6 @@
  * PERFORMANCE OF THIS SOFTWARE.
  */
 
-/*
-* This file was originally distributed by Qualcomm Atheros, Inc.
-* under proprietary terms before Copyright ownership was assigned
-* to the Linux Foundation.
-*/
 #if !defined(__CDS_API_H)
 #define __CDS_API_H
 
@@ -253,7 +245,7 @@ if (cds_is_load_or_unload_in_progress() || cds_is_driver_recovering() ||
 */
 static inline bool cds_is_fw_down(void)
 {
-return pld_is_fw_down();
+	return pld_is_fw_down();
 }
 
 /**
@@ -263,9 +255,9 @@ return pld_is_fw_down();
 */
 static inline bool cds_is_target_ready(void)
 {
-enum cds_driver_state state = cds_get_driver_state();
+	enum cds_driver_state state = cds_get_driver_state();
 
-return __CDS_IS_DRIVER_STATE(state, CDS_DRIVER_STATE_FW_READY);
+	return __CDS_IS_DRIVER_STATE(state, CDS_DRIVER_STATE_FW_READY);
 }
 
 /**
@@ -537,13 +529,14 @@ void cds_print_htc_credit_history(uint32_t count, qdf_abstract_print * print,
  * cds_smmu_mem_map_setup() - Check SMMU S1 stage enable
  *                            status and setup wlan driver
  * @osdev: Parent device instance
+ * @ipa_present: IPA HW support flag
  *
  * This API checks if SMMU S1 translation is enabled in
  * platform driver or not and sets it accordingly in driver.
  *
- * Return: none
+ * Return: QDF_STATUS
  */
-void cds_smmu_mem_map_setup(qdf_device_t osdev);
+QDF_STATUS cds_smmu_mem_map_setup(qdf_device_t osdev, bool ipa_present);
 
 /**
  * cds_smmu_map_unmap() - Map / Unmap DMA buffer to IPA UC
@@ -576,4 +569,17 @@ uint32_t cds_get_mcc_to_scc_switch_mode(void);
  * Return: true if sta, sap scc is allowed on dfs channel otherwise false
  */
 bool cds_is_sta_sap_scc_allowed_on_dfs_channel(void);
+/**
+ * cds_register_mode_change_cb() - Register mode change callback with CDS
+ * @callback: HDD callback to be registered
+ *
+ * Return: QDF_STATUS
+ */
+QDF_STATUS cds_register_mode_change_cb(send_mode_change_event_cb callback);
+/**
+ * cds_deregister_mode_change_cb() - Deregister mode change callback with CDS
+ *
+ * Return: QDF_STATUS
+ */
+QDF_STATUS cds_deregister_mode_change_cb(void);
 #endif /* if !defined __CDS_API_H */

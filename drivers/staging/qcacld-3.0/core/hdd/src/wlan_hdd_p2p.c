@@ -1,9 +1,6 @@
 /*
  * Copyright (c) 2012-2018 The Linux Foundation. All rights reserved.
  *
- * Previously licensed under the ISC license by Qualcomm Atheros, Inc.
- *
- *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
  * above copyright notice and this permission notice appear in all
@@ -17,12 +14,6 @@
  * PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER
  * TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR
  * PERFORMANCE OF THIS SOFTWARE.
- */
-
-/*
- * This file was originally distributed by Qualcomm Atheros, Inc.
- * under proprietary terms before Copyright ownership was assigned
- * to the Linux Foundation.
  */
 
 /**
@@ -1146,6 +1137,12 @@ static int wlan_hdd_execute_remain_on_channel(hdd_adapter_t *pAdapter,
 			duration *= P2P_ROC_DURATION_MULTIPLIER_GO_PRESENT;
 		else
 			duration *= P2P_ROC_DURATION_MULTIPLIER_GO_ABSENT;
+
+		/* this is to protect too huge value if some customers
+		 * give a higher value from supplicant
+		 */
+		if (duration > HDD_P2P_MAX_ROC_DURATION)
+			duration = HDD_P2P_MAX_ROC_DURATION;
 	}
 
 	hdd_prevent_suspend(WIFI_POWER_EVENT_WAKELOCK_ROC);
@@ -1963,6 +1960,7 @@ static int __wlan_hdd_mgmt_tx(struct wiphy *wiphy, struct wireless_dev *wdev,
 	uint8_t home_ch = 0;
 	bool enb_random_mac = false;
 	uint32_t mgmt_hdr_len = sizeof(struct ieee80211_hdr_3addr);
+	QDF_STATUS qdf_status;
 	int32_t mgmt_id;
 
 	ENTER();
@@ -1996,6 +1994,22 @@ static int __wlan_hdd_mgmt_tx(struct wiphy *wiphy, struct wireless_dev *wdev,
 	hdd_debug("Device_mode %s(%d) type: %d, wait: %d, offchan: %d",
 		   hdd_device_mode_to_string(pAdapter->device_mode),
 		   pAdapter->device_mode, type, wait, offchan);
+
+	/*
+	 * When frame to be transmitted is auth mgmt, then trigger
+	 * sme_send_mgmt_tx to send auth frame
+	 */
+	if ((pAdapter->device_mode == QDF_STA_MODE) &&
+	    (type == SIR_MAC_MGMT_FRAME &&
+	    subType == SIR_MAC_MGMT_AUTH)) {
+		qdf_status = sme_send_mgmt_tx(WLAN_HDD_GET_HAL_CTX(pAdapter),
+					      pAdapter->sessionId, buf, len);
+
+		if (QDF_IS_STATUS_SUCCESS(qdf_status))
+			return 0;
+		else
+			return -EINVAL;
+	}
 
 	if (type == SIR_MAC_MGMT_FRAME && subType == SIR_MAC_MGMT_ACTION &&
 	    len > IEEE80211_MIN_ACTION_SIZE)
@@ -2862,6 +2876,7 @@ wlan_hdd_allow_sap_add(hdd_context_t *hdd_ctx,
 		adapter = adapter_node->pAdapter;
 		if (adapter && adapter->device_mode == QDF_SAP_MODE &&
 		    test_bit(NET_DEVICE_REGISTERED, &adapter->event_flags) &&
+		    adapter->dev &&
 		    !strncmp(adapter->dev->name, name, IFNAMSIZ)) {
 			beacon_data_t *beacon = adapter->sessionCtx.ap.beacon;
 
@@ -2870,7 +2885,7 @@ wlan_hdd_allow_sap_add(hdd_context_t *hdd_ctx,
 				adapter->sessionCtx.ap.beacon = NULL;
 				qdf_mem_free(beacon);
 			}
-			if (adapter->dev && adapter->dev->ieee80211_ptr) {
+			if (adapter->dev->ieee80211_ptr) {
 				*sap_dev = adapter->dev->ieee80211_ptr;
 				return false;
 			}
@@ -2984,7 +2999,9 @@ struct wireless_dev *__wlan_hdd_add_virtual_intf(struct wiphy *wiphy,
 		pAdapter = hdd_open_adapter(pHddCtx,
 					    session_type,
 					    name,
-					    wlan_hdd_get_intf_addr(pHddCtx),
+					    wlan_hdd_get_intf_addr(
+								pHddCtx,
+								session_type),
 					    name_assign_type,
 					    true);
 	}
@@ -3289,8 +3306,8 @@ static inline bool is_public_action_frame(uint8_t *pb_frames,
 static inline bool is_p2p_action_frame(uint8_t *pb_frames,
 				       uint32_t frame_len)
 {
-	if (frame_len <= WLAN_HDD_PUBLIC_ACTION_FRAME_OFFSET +
-	    SIR_MAC_P2P_OUI_SIZE) {
+	if (frame_len <= (WLAN_HDD_PUBLIC_ACTION_FRAME_OFFSET +
+	    SIR_MAC_P2P_OUI_SIZE + 2)) {
 		hdd_debug("Not a p2p action frame len: %d", frame_len);
 		return false;
 	}

@@ -1,8 +1,5 @@
 /*
- * Copyright (c) 2012-2017 The Linux Foundation. All rights reserved.
- *
- * Previously licensed under the ISC license by Qualcomm Atheros, Inc.
- *
+ * Copyright (c) 2012-2018 The Linux Foundation. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -17,12 +14,6 @@
  * PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER
  * TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR
  * PERFORMANCE OF THIS SOFTWARE.
- */
-
-/*
- * This file was originally distributed by Qualcomm Atheros, Inc.
- * under proprietary terms before Copyright ownership was assigned
- * to the Linux Foundation.
  */
 
 #if !defined(__CDS_SCHED_H)
@@ -88,6 +79,8 @@
 #endif
 
 typedef void (*cds_ol_rx_thread_cb)(void *context, void *rxpkt, uint16_t staid);
+
+typedef int (*send_mode_change_event_cb)(void);
 
 /*
 ** QDF Message queue definition.
@@ -246,6 +239,7 @@ typedef struct _cds_msg_wrapper {
 
 /* forward-declare hdd_context_s as it is used ina function type */
 struct hdd_context_s;
+struct hdd_adapter_s;
 typedef struct _cds_context_type {
 	/* Messages buffers */
 	cds_msg_t aMsgBuffers[CDS_CORE_MAX_MESSAGES];
@@ -306,7 +300,8 @@ typedef struct _cds_context_type {
 	qdf_mutex_t qdf_conc_list_lock;
 	qdf_mc_timer_t dbs_opportunistic_timer;
 #ifdef FEATURE_WLAN_MCC_TO_SCC_SWITCH
-	void (*sap_restart_chan_switch_cb)(void *, uint32_t, uint32_t);
+	void (*sap_restart_chan_switch_cb)(struct hdd_adapter_s *,
+					   uint32_t, uint32_t);
 #endif
 	QDF_STATUS (*sme_get_valid_channels)(void*, uint16_t cfg_id,
 		uint8_t *, uint32_t *);
@@ -340,6 +335,8 @@ typedef struct _cds_context_type {
 	qdf_work_t cds_recovery_work;
 	qdf_workqueue_t *cds_recovery_wq;
 	enum cds_hang_reason recovery_reason;
+	qdf_event_t channel_switch_complete;
+	send_mode_change_event_cb mode_change_cb;
 } cds_context_type, *p_cds_contextType;
 
 extern struct _cds_sched_context *gp_cds_sched_context;

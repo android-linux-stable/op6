@@ -1,9 +1,6 @@
 /*
  * Copyright (c) 2012-2018 The Linux Foundation. All rights reserved.
  *
- * Previously licensed under the ISC license by Qualcomm Atheros, Inc.
- *
- *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
  * above copyright notice and this permission notice appear in all
@@ -17,12 +14,6 @@
  * PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER
  * TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR
  * PERFORMANCE OF THIS SOFTWARE.
- */
-
-/*
- * This file was originally distributed by Qualcomm Atheros, Inc.
- * under proprietary terms before Copyright ownership was assigned
- * to the Linux Foundation.
  */
 
 /*
@@ -737,7 +728,7 @@ static void lim_print_ht_cap(tpAniSirGlobal mac_ctx, tpPESession session,
  *
  * wpa ie related checks
  *
- * Return: true of no error, false otherwise
+ * Return: true if no error, false otherwise
  */
 static bool lim_chk_n_process_wpa_rsn_ie(tpAniSirGlobal mac_ctx,
 					 tpSirMacMgmtHdr hdr,
@@ -746,8 +737,9 @@ static bool lim_chk_n_process_wpa_rsn_ie(tpAniSirGlobal mac_ctx,
 					 uint8_t sub_type, bool *pmf_connection)
 {
 	uint8_t *wps_ie = NULL;
-	tDot11fIEWPA dot11f_ie_wpa;
-	tDot11fIERSN dot11f_ie_rsn;
+	uint32_t ret;
+	tDot11fIEWPA dot11f_ie_wpa = {0};
+	tDot11fIERSN dot11f_ie_rsn = {0};
 	tSirRetStatus status = eSIR_SUCCESS;
 	/*
 	 * Clear the buffers so that frame parser knows that there isn't a
@@ -776,11 +768,11 @@ static bool lim_chk_n_process_wpa_rsn_ie(tpAniSirGlobal mac_ctx,
 			if (assoc_req->rsnPresent) {
 				if (assoc_req->rsn.length) {
 					/* Unpack the RSN IE */
-					if (dot11f_unpack_ie_rsn(mac_ctx,
+					ret = dot11f_unpack_ie_rsn(mac_ctx,
 						&assoc_req->rsn.info[0],
 						assoc_req->rsn.length,
-						&dot11f_ie_rsn, false) !=
-							DOT11F_PARSE_SUCCESS) {
+						&dot11f_ie_rsn, false);
+					if (!DOT11F_SUCCEEDED(ret)) {
 						pe_err("Invalid RSN ie");
 						return false;
 					}
@@ -852,11 +844,11 @@ static bool lim_chk_n_process_wpa_rsn_ie(tpAniSirGlobal mac_ctx,
 				/* Unpack the WPA IE */
 				if (assoc_req->wpa.length) {
 					/* OUI is not taken care */
-					if (dot11f_unpack_ie_wpa(mac_ctx,
-						&assoc_req->wpa.info[4],
-						assoc_req->wpa.length,
-						&dot11f_ie_wpa, false) !=
-							DOT11F_PARSE_SUCCESS) {
+					ret = dot11f_unpack_ie_wpa(mac_ctx,
+						   &assoc_req->wpa.info[4],
+						   (assoc_req->wpa.length - 4),
+						   &dot11f_ie_wpa, false);
+					if (!DOT11F_SUCCEEDED(ret)) {
 						pe_err("Invalid WPA IE");
 						return false;
 					}
@@ -1102,6 +1094,7 @@ static bool lim_process_assoc_req_sta_ctx(tpAniSirGlobal mac_ctx,
 			eLIM_MLM_AUTHENTICATED_STATE)) {
 			/* STA has triggered pre-auth again */
 			*auth_type = sta_pre_auth_ctx->authType;
+			sta_ds->prev_auth_seq_no = sta_pre_auth_ctx->seq_num;
 			lim_delete_pre_auth_node(mac_ctx, hdr->sa);
 		} else {
 			*auth_type = sta_ds->mlmStaContext.authType;
@@ -1248,6 +1241,9 @@ static bool lim_update_sta_ds(tpAniSirGlobal mac_ctx, tpSirMacMgmtHdr hdr,
 	sta_ds->qos.addts = assoc_req->addtsReq;
 	sta_ds->qos.capability = assoc_req->qosCapability;
 	sta_ds->versionPresent = 0;
+	sta_ds->prev_assoc_seq_no = (((hdr->seqControl.seqNumHi <<
+					HIGH_SEQ_NUM_OFFSET) |
+					hdr->seqControl.seqNumLo));
 	/*
 	 * short slot and short preamble should be updated before doing
 	 * limaddsta
@@ -1768,19 +1764,21 @@ void lim_process_assoc_req_frame(tpAniSirGlobal mac_ctx, uint8_t *rx_pkt_info,
 	}
 
 	/*
-	 * If a STA is already present in DPH and it is initiating a Assoc
-	 * re-transmit, do not process it. This can happen when first Assoc Req
-	 * frame is received but ACK lost at STA side. The ACK for this dropped
-	 * Assoc Req frame should be sent by HW. Host simply does not process it
-	 * once the entry for the STA is already present in DPH.
+	 * If a STA is already present in DPH and the host receives an assoc
+	 * request with the same sequence number , do not process it, as the
+	 * previous assoc has already been processed and the response will be
+	 * retried by the firmware if the peer hasnt received the response yet
 	 */
 	sta_ds = dph_lookup_hash_entry(mac_ctx, hdr->sa, &assoc_id,
 				&session->dph.dphHashTable);
 	if (NULL != sta_ds) {
-		if (hdr->fc.retry > 0) {
-			pe_err("STA is initiating Assoc Req after ACK lost. Do not process sessionid: %d sys sub_type=%d for role=%d from: "
-				MAC_ADDRESS_STR, session->peSessionId,
-			sub_type, GET_LIM_SYSTEM_ROLE(session),
+		if (sta_ds->prev_assoc_seq_no == (((hdr->seqControl.seqNumHi <<
+						  HIGH_SEQ_NUM_OFFSET) |
+						  hdr->seqControl.seqNumLo))) {
+			pe_err("Got an Assoc Req with same seq no. SN:%d .Do not process sessionid: %d sys sub_type=%d for role=%d from: "
+				MAC_ADDRESS_STR, sta_ds->prev_assoc_seq_no,
+				session->peSessionId,
+				sub_type, GET_LIM_SYSTEM_ROLE(session),
 			MAC_ADDR_ARRAY(hdr->sa));
 			return;
 		} else if (!sta_ds->rmfEnabled && (sub_type == LIM_REASSOC)) {
@@ -1844,6 +1842,11 @@ void lim_process_assoc_req_frame(tpAniSirGlobal mac_ctx, uint8_t *rx_pkt_info,
 	if ((session->access_policy_vendor_ie) &&
 		(session->access_policy ==
 		LIM_ACCESS_POLICY_RESPOND_IF_IE_IS_PRESENT)) {
+		if (frame_len <= LIM_ASSOC_REQ_IE_OFFSET) {
+			pe_debug("Received action frame of invalid len %d",
+				 frame_len);
+			return;
+		}
 		if (!cfg_get_vendor_ie_ptr_from_oui(mac_ctx,
 			&session->access_policy_vendor_ie[2],
 			3, frm_body + LIM_ASSOC_REQ_IE_OFFSET,
@@ -2079,9 +2082,12 @@ static void lim_fill_assoc_ind_wapi_info(tpAniSirGlobal mac_ctx,
 static void lim_fill_assoc_ind_vht_info(tpAniSirGlobal mac_ctx,
 					tpPESession session_entry,
 					tpSirAssocReq assoc_req,
-					tpLimMlmAssocInd assoc_ind)
+					tpLimMlmAssocInd assoc_ind,
+					tpDphHashNode sta_ds)
 {
 	uint8_t chan;
+	uint8_t i;
+	bool nw_type_11b = true;
 
 	if (session_entry->limRFBand == SIR_BAND_2_4_GHZ) {
 		if (session_entry->vhtCapability && assoc_req->VHTCaps.present)
@@ -2089,8 +2095,19 @@ static void lim_fill_assoc_ind_vht_info(tpAniSirGlobal mac_ctx,
 		else if (session_entry->htCapability
 			    && assoc_req->HTCaps.present)
 			assoc_ind->chan_info.info = MODE_11NG_HT20;
-		else
-			assoc_ind->chan_info.info = MODE_11G;
+		else {
+			for (i = 0; i < SIR_NUM_11A_RATES; i++) {
+				if (sirIsArate(sta_ds->
+					       supportedRates.llaRates[i]
+					       & 0x7F)) {
+					assoc_ind->chan_info.info = MODE_11G;
+					nw_type_11b = false;
+					break;
+				}
+			}
+			if (nw_type_11b)
+				assoc_ind->chan_info.info = MODE_11B;
+		}
 		return;
 	}
 
@@ -2432,7 +2449,7 @@ void lim_send_mlm_assoc_ind(tpAniSirGlobal mac_ctx,
 		 qdf_mem_copy(&assoc_ind->VHTCaps, &assoc_req->VHTCaps,
 			      sizeof(tDot11fIEVHTCaps));
 		lim_fill_assoc_ind_vht_info(mac_ctx, session_entry, assoc_req,
-			assoc_ind);
+					    assoc_ind, sta_ds);
 		lim_post_sme_message(mac_ctx, LIM_MLM_ASSOC_IND,
 			 (uint32_t *) assoc_ind);
 		qdf_mem_free(assoc_ind);

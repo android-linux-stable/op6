@@ -1,8 +1,5 @@
 /*
- * Copyright (c) 2014-2017 The Linux Foundation. All rights reserved.
- *
- * Previously licensed under the ISC license by Qualcomm Atheros, Inc.
- *
+ * Copyright (c) 2014-2018 The Linux Foundation. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -17,12 +14,6 @@
  * PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER
  * TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR
  * PERFORMANCE OF THIS SOFTWARE.
- */
-
-/*
- * This file was originally distributed by Qualcomm Atheros, Inc.
- * under proprietary terms before Copyright ownership was assigned
- * to the Linux Foundation.
  */
 
 /**
@@ -358,7 +349,8 @@ __cds_cpu_hotplug_notify(struct notifier_block *block,
 	if ((NULL == pSchedContext) || (NULL == pSchedContext->ol_rx_thread))
 		return NOTIFY_OK;
 
-	if (cds_is_load_or_unload_in_progress())
+	if (cds_is_load_or_unload_in_progress() ||
+	    cds_is_module_stop_in_progress() || cds_is_driver_recovering())
 		return NOTIFY_OK;
 
 	num_cpus = num_possible_cpus();
@@ -612,13 +604,13 @@ static void cds_mc_thread_watchdog_notify(cds_msg_t *msg)
 	if (msg->callback)
 		qdf_sprint_symbol(symbol, msg->callback);
 
-	cds_err("Callback %s (type 0x%x) exceeded its allotted time of %ds",
+	cds_err("WLAN_BUG_RCA: Callback %s (type 0x%x) exceeded its allotted time of %ds",
 		msg->callback ? symbol : "<null>", msg->type,
 		MC_THRD_WD_TIMEOUT / 1000);
 }
 
 #ifdef CONFIG_SLUB_DEBUG_ON
-static void cds_mc_thread_watchdog_timeout(void *arg)
+static void cds_mc_thread_watchdog_timeout(unsigned long arg)
 {
 	cds_msg_t *msg = *(cds_msg_t **)arg;
 
@@ -638,7 +630,7 @@ static void cds_mc_thread_watchdog_timeout(void *arg)
 	QDF_BUG(0);
 }
 #else
-static inline void cds_mc_thread_watchdog_timeout(void *arg)
+static inline void cds_mc_thread_watchdog_timeout(unsigned long arg)
 {
 	cds_msg_t *msg = *(cds_msg_t **)arg;
 
@@ -920,6 +912,8 @@ static int cds_mc_thread(void *Arg)
 	qdf_timer_free(&wd_timer);
 
 	complete_and_exit(&pSchedContext->McShutdown, 0);
+
+	return 0;
 } /* cds_mc_thread() */
 
 #ifdef QCA_CONFIG_SMP
@@ -1232,6 +1226,8 @@ static int cds_ol_rx_thread(void *arg)
 	QDF_TRACE(QDF_MODULE_ID_QDF, QDF_TRACE_LEVEL_DEBUG,
 		  "%s: Exiting CDS OL rx thread", __func__);
 	complete_and_exit(&pSchedContext->ol_rx_shutdown, 0);
+
+	return 0;
 }
 #endif
 

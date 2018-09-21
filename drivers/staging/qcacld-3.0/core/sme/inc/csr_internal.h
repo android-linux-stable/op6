@@ -1,8 +1,5 @@
 /*
- * Copyright (c) 2011-2017 The Linux Foundation. All rights reserved.
- *
- * Previously licensed under the ISC license by Qualcomm Atheros, Inc.
- *
+ * Copyright (c) 2011-2018 The Linux Foundation. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -17,12 +14,6 @@
  * PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER
  * TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR
  * PERFORMANCE OF THIS SOFTWARE.
- */
-
-/*
- * This file was originally distributed by Qualcomm Atheros, Inc.
- * under proprietary terms before Copyright ownership was assigned
- * to the Linux Foundation.
  */
 
 /**
@@ -475,6 +466,17 @@ typedef struct tagCsrNeighborRoamConfig {
 	int32_t nhi_rssi_scan_rssi_ub;
 } tCsrNeighborRoamConfig;
 
+/*
+ * Neighbor Report Params Bitmask
+ */
+#define NEIGHBOR_REPORT_PARAMS_TIME_OFFSET            0x01
+#define NEIGHBOR_REPORT_PARAMS_LOW_RSSI_OFFSET        0x02
+#define NEIGHBOR_REPORT_PARAMS_BMISS_COUNT_TRIGGER    0x04
+#define NEIGHBOR_REPORT_PARAMS_PER_THRESHOLD_OFFSET   0x08
+#define NEIGHBOR_REPORT_PARAMS_CACHE_TIMEOUT          0x10
+#define NEIGHBOR_REPORT_PARAMS_MAX_REQ_CAP            0x20
+#define NEIGHBOR_REPORT_PARAMS_ALL                    0x3F
+
 typedef struct tagCsrConfig {
 	uint32_t agingCount;
 	uint32_t FragmentationThreshold;
@@ -582,6 +584,7 @@ typedef struct tagCsrConfig {
 	/* To enable scanning 2g channels twice on single scan req from HDD */
 	bool fScanTwice;
 	uint32_t nVhtChannelWidth;
+	bool enable_subfee_vendor_vhtie;
 	uint8_t enable_txbf_sap_mode;
 	bool enable_vht20_mcs9;
 	uint8_t enable2x2;
@@ -602,6 +605,9 @@ typedef struct tagCsrConfig {
 	bool enableHeartBeatOffload;
 	uint8_t max_amsdu_num;
 	uint8_t nSelect5GHzMargin;
+	uint32_t ho_delay_for_rx;
+	uint32_t min_delay_btw_roam_scans;
+	uint32_t roam_trigger_reason_bitmask;
 	uint8_t isCoalesingInIBSSAllowed;
 #ifdef FEATURE_WLAN_MCC_TO_SCC_SWITCH
 	uint8_t cc_switch_mode;
@@ -647,10 +653,19 @@ typedef struct tagCsrConfig {
 	bool enable_fatal_event;
 	bool vendor_vht_sap;
 	enum wmi_dwelltime_adaptive_mode scan_adaptive_dwell_mode;
+	enum wmi_dwelltime_adaptive_mode scan_adaptive_dwell_mode_nc;
 	enum wmi_dwelltime_adaptive_mode roamscan_adaptive_dwell_mode;
 	struct csr_sta_roam_policy_params sta_roam_policy;
 	uint32_t tx_aggregation_size;
+	uint32_t tx_aggregation_size_be;
+	uint32_t tx_aggregation_size_bk;
+	uint32_t tx_aggregation_size_vi;
+	uint32_t tx_aggregation_size_vo;
 	uint32_t rx_aggregation_size;
+	uint32_t tx_aggr_sw_retry_threshold_be;
+	uint32_t tx_aggr_sw_retry_threshold_bk;
+	uint32_t tx_aggr_sw_retry_threshold_vi;
+	uint32_t tx_aggr_sw_retry_threshold_vo;
 	struct wmi_per_roam_config per_roam_config;
 	bool enable_bcast_probe_rsp;
 	bool is_fils_enabled;
@@ -671,7 +686,10 @@ typedef struct tagCsrConfig {
 	uint32_t wlm_latency_flags[CSR_NUM_WLM_LATENCY_LEVEL];
 	struct sir_score_config bss_score_params;
 	uint8_t oce_feature_bitmap;
+	uint32_t offload_11k_enable_bitmask;
+	struct csr_neighbor_report_offload_params neighbor_report_offload;
 	bool enable_ftopen;
+	bool roam_force_rssi_trigger;
 } tCsrConfig;
 
 typedef struct tagCsrChannelPowerInfo {
@@ -1022,6 +1040,9 @@ typedef struct tagCsrRoamSession {
 	bool ch_switch_in_progress;
 	bool roam_synch_in_progress;
 	bool supported_nss_1x1;
+	uint8_t vdev_nss;
+	uint8_t nss;
+	bool nss_forced_1x1;
 	bool disable_hi_rssi;
 	bool dhcp_done;
 	uint8_t disconnect_reason;
@@ -1032,6 +1053,7 @@ typedef struct tagCsrRoamSession {
 	bool ignore_assoc_disallowed;
 	bool discon_in_progress;
 	struct csr_disconnect_stats disconnect_stats;
+	struct rsn_caps rsn_caps;
 } tCsrRoamSession;
 
 typedef struct tagCsrRoamStruct {
@@ -1077,6 +1099,7 @@ typedef struct tagCsrRoamStruct {
 	uint16_t reassocRespLen;        /* length of reassociation response */
 	qdf_mc_timer_t packetdump_timer;
 	qdf_list_t rssi_disallow_bssid;
+	spinlock_t roam_state_lock;
 } tCsrRoamStruct;
 
 #define GET_NEXT_ROAM_ID(pRoamStruct)  (((pRoamStruct)->nextRoamId + 1 == 0) ? \
@@ -1270,6 +1293,18 @@ bool csr_is_sta_session_connected(tpAniSirGlobal pMac);
 bool csr_is_p2p_session_connected(tpAniSirGlobal pMac);
 bool csr_is_any_session_connected(tpAniSirGlobal pMac);
 bool csr_is_infra_connected(tpAniSirGlobal pMac);
+
+/**
+ * csr_get_connected_infra() - get the session id of the connected infra
+ * @mac_ctx:  pointer to global mac structure
+ *
+ * The function check if any infra is present in connected state and if present
+ * return the session id of the connected infra else if no infra is in connected
+ * state return CSR_SESSION_ID_INVALID
+ *
+ * Return: session id of the connected infra
+ */
+uint8_t csr_get_connected_infra(tpAniSirGlobal mac_ctx);
 bool csr_is_concurrent_infra_connected(tpAniSirGlobal pMac);
 bool csr_is_concurrent_session_running(tpAniSirGlobal pMac);
 bool csr_is_infra_ap_started(tpAniSirGlobal pMac);

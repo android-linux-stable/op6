@@ -1,8 +1,5 @@
 /*
- * Copyright (c) 2016-2017 The Linux Foundation. All rights reserved.
- *
- * Previously licensed under the ISC license by Qualcomm Atheros, Inc.
- *
+ * Copyright (c) 2016-2018 The Linux Foundation. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -17,12 +14,6 @@
  * PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER
  * TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR
  * PERFORMANCE OF THIS SOFTWARE.
- */
-
-/*
- * This file was originally distributed by Qualcomm Atheros, Inc.
- * under proprietary terms before Copyright ownership was assigned
- * to the Linux Foundation.
  */
 
 #define pr_fmt(fmt) "wlan_pld:%s:%d:: " fmt, __func__, __LINE__
@@ -1314,7 +1305,7 @@ void *pld_smmu_get_mapping(struct device *dev)
 		ptr = pld_snoc_smmu_get_mapping(dev);
 		break;
 	case PLD_BUS_TYPE_PCIE:
-		pr_err("Not supported on type %d\n", type);
+		ptr = pld_pcie_smmu_get_mapping();
 		break;
 	default:
 		pr_err("Invalid device type %d\n", type);
@@ -1345,8 +1336,7 @@ int pld_smmu_map(struct device *dev, phys_addr_t paddr,
 		ret = pld_snoc_smmu_map(dev, paddr, iova_addr, size);
 		break;
 	case PLD_BUS_TYPE_PCIE:
-		pr_err("Not supported on type %d\n", type);
-		ret = -ENODEV;
+		ret = pld_pcie_smmu_map(paddr, iova_addr, size);
 		break;
 	default:
 		pr_err("Invalid device type %d\n", type);

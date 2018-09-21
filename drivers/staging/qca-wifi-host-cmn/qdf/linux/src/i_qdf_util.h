@@ -1,8 +1,5 @@
 /*
- * Copyright (c) 2014-2017 The Linux Foundation. All rights reserved.
- *
- * Previously licensed under the ISC license by Qualcomm Atheros, Inc.
- *
+ * Copyright (c) 2014-2018 The Linux Foundation. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -17,12 +14,6 @@
  * PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER
  * TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR
  * PERFORMANCE OF THIS SOFTWARE.
- */
-
-/*
- * This file was originally distributed by Qualcomm Atheros, Inc.
- * under proprietary terms before Copyright ownership was assigned
- * to the Linux Foundation.
  */
 
 /**
@@ -62,6 +53,10 @@
 #include "ath_carr_pltfrm.h"
 #else
 #include <linux/byteorder/generic.h>
+#endif
+
+#ifdef ENABLE_SMMU_S1_TRANSLATION
+#include <linux/ipa.h>
 #endif
 
 /*
@@ -400,5 +395,23 @@ uint64_t __qdf_do_mod(uint64_t dividend, uint32_t divisor)
 {
 	return do_div(dividend, divisor);
 }
+
+#ifdef ENABLE_SMMU_S1_TRANSLATION
+/**
+ * qdf_get_ipa_smmu_status() - to get IPA SMMU status
+ *
+ * Return: IPA SMMU status
+ */
+static bool __qdf_get_ipa_smmu_status(void)
+{
+	struct ipa_smmu_in_params params_in;
+	struct ipa_smmu_out_params params_out;
+
+	params_in.smmu_client = IPA_SMMU_WLAN_CLIENT;
+	ipa_get_smmu_params(&params_in, &params_out);
+
+	return params_out.smmu_enable;
+}
+#endif
 
 #endif /*_I_QDF_UTIL_H*/

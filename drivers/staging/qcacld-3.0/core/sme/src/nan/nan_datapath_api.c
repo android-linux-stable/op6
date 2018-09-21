@@ -1,7 +1,5 @@
 /*
- * Copyright (c) 2016-2017 The Linux Foundation. All rights reserved.
- *
- * Previously licensed under the ISC license by Qualcomm Atheros, Inc.
+ * Copyright (c) 2016-2018 The Linux Foundation. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -424,19 +422,17 @@ void csr_roam_save_ndi_connected_info(tpAniSirGlobal mac_ctx,
 				      tCsrRoamProfile *roam_profile,
 				      tSirBssDescription *bssdesc)
 {
-	tCsrRoamSession *roam_session = NULL;
-	tCsrRoamConnectedProfile *connect_profile = NULL;
+	tCsrRoamSession *roam_session;
+	tCsrRoamConnectedProfile *connect_profile;
 
 	roam_session = CSR_GET_SESSION(mac_ctx, session_id);
-	if (NULL == roam_session) {
-		QDF_TRACE(QDF_MODULE_ID_SME, QDF_TRACE_LEVEL_ERROR,
-			FL("session %d not found"), session_id);
+	if (!roam_session) {
+		sme_err("session %d not found", session_id);
 		return;
 	}
 
 	connect_profile = &roam_session->connectedProfile;
-	qdf_mem_set(&roam_session->connectedProfile,
-		sizeof(connect_profile), 0);
+	qdf_mem_zero(connect_profile, sizeof(*connect_profile));
 	connect_profile->AuthType = roam_profile->negotiatedAuthType;
 		connect_profile->AuthInfo = roam_profile->AuthType;
 	connect_profile->EncryptionType =
@@ -452,7 +448,7 @@ void csr_roam_save_ndi_connected_info(tpAniSirGlobal mac_ctx,
 	connect_profile->operationChannel = bssdesc->channelId;
 	connect_profile->beaconInterval = 0;
 	qdf_mem_copy(&connect_profile->Keys, &roam_profile->Keys,
-		sizeof(roam_profile->Keys));
+		     sizeof(roam_profile->Keys));
 	csr_get_bss_id_bss_desc(mac_ctx, bssdesc, &connect_profile->bssid);
 	connect_profile->SSID.length = 0;
 	csr_free_connect_bss_desc(mac_ctx, session_id);
@@ -688,11 +684,19 @@ void sme_ndp_msg_processor(tpAniSirGlobal mac_ctx, cds_msg_t *msg)
 		cmd = GET_BASE_ADDR(entry, tSmeCmd, Link);
 
 	switch (msg->type) {
+	case eWNI_SME_NDP_SCH_UPDATE_IND: {
+		result = eCSR_ROAM_RESULT_NDP_SCH_UPDATE_IND;
+		/* copy msg from msg body to roam info passed to callback */
+		qdf_mem_copy(&roam_info.ndp.sch_update_params, msg->bodyptr,
+			     sizeof(roam_info.ndp.sch_update_params));
+		session_id = roam_info.ndp.sch_update_params.vdev_id;
+		break;
+	}
 	case eWNI_SME_NDP_CONFIRM_IND: {
 		result = eCSR_ROAM_RESULT_NDP_CONFIRM_IND;
 		/* copy msg from msg body to roam info passed to callback */
 		qdf_mem_copy(&roam_info.ndp.ndp_confirm_params, msg->bodyptr,
-			sizeof(roam_info.ndp.ndp_confirm_params));
+			     sizeof(roam_info.ndp.ndp_confirm_params));
 		session_id = roam_info.ndp.ndp_confirm_params.vdev_id;
 		break;
 	}
@@ -822,7 +826,14 @@ void sme_ndp_msg_processor(tpAniSirGlobal mac_ctx, cds_msg_t *msg)
 			cmd->u.data_end_req = NULL;
 		}
 		break;
-	case eWNI_SME_NDP_END_IND:
+	case eWNI_SME_NDP_CONFIRM_IND:
+		qdf_mem_free(
+			roam_info.ndp.ndp_confirm_params.ndp_info.ndp_app_info);
+		roam_info.ndp.ndp_confirm_params.ndp_info.ndp_app_info = NULL;
+		break;
+	case eWNI_SME_NDP_SCH_UPDATE_IND:
+		qdf_mem_free(roam_info.ndp.sch_update_params.ndp_instances);
+		roam_info.ndp.sch_update_params.ndp_instances = NULL;
 		break;
 	default:
 		break;

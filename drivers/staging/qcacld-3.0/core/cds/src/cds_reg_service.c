@@ -1,8 +1,5 @@
 /*
- * Copyright (c) 2014-2017 The Linux Foundation. All rights reserved.
- *
- * Previously licensed under the ISC license by Qualcomm Atheros, Inc.
- *
+ * Copyright (c) 2014-2018 The Linux Foundation. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -19,12 +16,6 @@
  * PERFORMANCE OF THIS SOFTWARE.
  */
 
-/*
- * This file was originally distributed by Qualcomm Atheros, Inc.
- * under proprietary terms before Copyright ownership was assigned
- * to the Linux Foundation.
- */
-
 /*============================================================================
    FILE:         cds_reg_service.c
    OVERVIEW:     This source file contains definitions for CDS regulatory APIs
@@ -37,6 +28,7 @@
 #include "qdf_trace.h"
 #include "cds_api.h"
 #include "cds_reg_service.h"
+#include "cds_utils.h"
 #include "cds_regdomain.h"
 #include "sme_api.h"
 #include "wlan_hdd_main.h"
@@ -85,6 +77,8 @@ const struct chan_map chan_mapping[NUM_CHANNELS] = {
 	[CHAN_ENUM_161] = {5805, 161},
 	[CHAN_ENUM_165] = {5825, 165},
 
+	[CHAN_ENUM_169] = {5845, 169},
+
 	[CHAN_ENUM_170] = {5852, 170},
 	[CHAN_ENUM_171] = {5855, 171},
 	[CHAN_ENUM_172] = {5860, 172},
@@ -124,7 +118,8 @@ static const struct bonded_chan bonded_chan_40mhz_array[] = {
 	{132, 136},
 	{140, 144},
 	{149, 153},
-	{157, 161}
+	{157, 161},
+	{165, 169}
 };
 
 static const struct bonded_chan bonded_chan_80mhz_array[] = {
@@ -154,6 +149,7 @@ static const enum phy_ch_width next_lower_bw[] = {
 struct regulatory_channel reg_channels[NUM_CHANNELS];
 static uint8_t default_country[CDS_COUNTRY_CODE_LEN + 1];
 static enum dfs_region dfs_region;
+static uint16_t reg_domain_5g;
 
 /**
  * cds_get_channel_list_with_power() - retrieve channel list with power
@@ -219,6 +215,16 @@ enum channel_enum cds_get_channel_enum(uint32_t chan_num)
 	return INVALID_CHANNEL;
 }
 
+void cds_set_channel_state(uint32_t chan_num, enum channel_state state)
+{
+	enum channel_enum chan_enum;
+
+	chan_enum = cds_get_channel_enum(chan_num);
+	if (INVALID_CHANNEL == chan_enum)
+		return;
+
+	reg_channels[chan_enum].state = state;
+}
 
 /**
  * cds_get_channel_state() - get the channel state
@@ -632,8 +638,22 @@ QDF_STATUS cds_get_reg_domain_from_country_code(v_REGDOMAIN_t *reg_domain_ptr,
 	hdd_context_t *hdd_ctx;
 
 	hdd_ctx = cds_get_context(QDF_MODULE_ID_HDD);
-	if (wlan_hdd_validate_context(hdd_ctx))
-		return false;
+
+	if (!hdd_ctx) {
+		QDF_TRACE(QDF_MODULE_ID_QDF, QDF_TRACE_LEVEL_ERROR,
+			  "hdd_ctx is NULL");
+		return QDF_STATUS_E_ENXIO;
+	}
+
+	if (cds_is_driver_unloading()) {
+		hdd_err("Driver is unloading can not open the hdd");
+		return QDF_STATUS_E_BUSY;
+	}
+
+	if (cds_is_driver_recovering()) {
+		hdd_err("WLAN is currently recovering; Please try again.");
+		return QDF_STATUS_E_BUSY;
+	}
 
 	if (NULL == reg_domain_ptr) {
 		QDF_TRACE(QDF_MODULE_ID_QDF, QDF_TRACE_LEVEL_ERROR,
@@ -693,6 +713,18 @@ bool cds_is_fcc_regdomain(void)
 	return false;
 }
 
+/**
+ * cds_set_5G_regdmn() - save 5G reg domain value
+ * @regdmn_5g: 5G reg domain value
+ *
+ * Return: None
+ */
+void cds_set_5G_regdmn(uint16_t regdmn_5g)
+{
+
+	reg_domain_5g = regdmn_5g;
+	cds_debug("5G reg domain value is set to %d", reg_domain_5g);
+}
 /*
  * cds_is_dsrc_channel() - is the channel DSRC
  * @center_freq: center freq of the channel
@@ -702,8 +734,59 @@ bool cds_is_fcc_regdomain(void)
  */
 bool cds_is_dsrc_channel(uint16_t center_freq)
 {
+	struct cds_config_info *cds_cfg;
+
+	cds_cfg = cds_get_ini_config();
+	if (!cds_cfg) {
+		cds_err("cds config is NULL");
+		return false;
+	}
+
+	if (!cds_cfg->dot11p_mode)
+		return false;
+
 	if (center_freq >= 5852 &&
 	    center_freq <= 5920)
+		return true;
+
+	return false;
+}
+
+/**
+ * cds_is_5g_regdmn_etsi13() - is the 5G regdomain ETSI13
+ *
+ * Return: true on ETSI13 regdomain, false otherwise
+ */
+bool cds_is_5g_regdmn_etsi13(void)
+{
+	if (ETSI13 == reg_domain_5g)
+		return true;
+	return false;
+}
+/*
+ * cds_is_etsi13_regdmn_srd_chan() - is the channel ETSI SRD channel
+ * @center_freq: center freq of the channel
+ *
+ * Return: true if channel is etsi13 domain SRD channel
+ *         false otherwise
+ */
+bool cds_is_etsi13_regdmn_srd_chan(uint16_t center_freq)
+{
+	struct cds_config_info *cds_cfg;
+
+	cds_cfg = cds_get_ini_config();
+	if (!cds_cfg) {
+		cds_err("cds config is NULL");
+		return false;
+	}
+	if (cds_cfg->dot11p_mode)
+		return false;
+
+	if (!cds_is_5g_regdmn_etsi13())
+		return false;
+
+	if (center_freq >= 5720 &&
+	    center_freq <= 5865)
 		return true;
 
 	return false;

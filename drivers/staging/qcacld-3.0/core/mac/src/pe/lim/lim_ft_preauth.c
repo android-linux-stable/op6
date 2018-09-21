@@ -1,7 +1,5 @@
 /*
- * Copyright (c) 2017 The Linux Foundation. All rights reserved.
- *
- * Previously licensed under the ISC license by Qualcomm Atheros, Inc.
+ * Copyright (c) 2017-2018 The Linux Foundation. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -294,10 +292,10 @@ void lim_perform_ft_pre_auth(tpAniSirGlobal pMac, QDF_STATUS status,
 	lim_diag_event_report(pMac, WLAN_PE_DIAG_ROAM_AUTH_START_EVENT,
 			pMac->lim.pSessionEntry, eSIR_SUCCESS, eSIR_SUCCESS);
 #endif
-
-	lim_send_auth_mgmt_frame(pMac, &authFrame,
-		 psessionEntry->ftPEContext.pFTPreAuthReq->preAuthbssId,
-		 LIM_NO_WEP_IN_FC, psessionEntry);
+	if (psessionEntry->ftPEContext.pFTPreAuthReq)
+		lim_send_auth_mgmt_frame(pMac, &authFrame,
+			 psessionEntry->ftPEContext.pFTPreAuthReq->preAuthbssId,
+			 LIM_NO_WEP_IN_FC, psessionEntry);
 
 	return;
 
@@ -484,14 +482,15 @@ void lim_handle_ft_pre_auth_rsp(tpAniSirGlobal pMac, tSirRetStatus status,
 		lim_print_mac_addr(pMac, psessionEntry->limReAssocbssId, LOGD);
 	}
 send_rsp:
-	if (psessionEntry->currentOperChannel !=
-	    psessionEntry->ftPEContext.pFTPreAuthReq->preAuthchannelNum) {
+	if ((psessionEntry->currentOperChannel !=
+	     psessionEntry->ftPEContext.pFTPreAuthReq->preAuthchannelNum) ||
+	    lim_is_in_mcc(pMac)) {
 		/* Need to move to the original AP channel */
 		lim_process_abort_scan_ind(pMac, psessionEntry->peSessionId,
 			psessionEntry->ftPEContext.pFTPreAuthReq->scan_id,
 			PREAUTH_REQUESTOR_ID);
 	} else {
-		pe_debug("Pre auth on same channel as connected AP channel %d",
+		pe_debug("Pre auth on same channel as connected AP channel %d and no mcc pe sessions exist",
 			psessionEntry->ftPEContext.pFTPreAuthReq->
 			preAuthchannelNum);
 		lim_ft_process_pre_auth_result(pMac, psessionEntry);
