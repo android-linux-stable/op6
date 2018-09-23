@@ -210,7 +210,7 @@
 #ifdef CONFIG_STACK_VALIDATION
 #define annotate_unreachable() ({					\
 	asm("1:\t\n"							\
-	    ".pushsection __unreachable, \"a\"\t\n"			\
+	    ".pushsection .discard.unreachable\t\n"			\
 	    ".long 1b\t\n"						\
 	    ".popsection\t\n");						\
 })
@@ -319,3 +319,7 @@
  * code
  */
 #define uninitialized_var(x) x = x
+
+#if GCC_VERSION >= 50100
+#define COMPILER_HAS_GENERIC_BUILTIN_OVERFLOW 1
+#endif

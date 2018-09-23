@@ -840,6 +840,8 @@ EXPORT_SYMBOL(napi_consume_skb);
 
 static void __copy_skb_header(struct sk_buff *new, const struct sk_buff *old)
 {
+	bool pfmemalloc;
+
 	new->tstamp		= old->tstamp;
 	/* We do not copy old->sk */
 	new->dev		= old->dev;
@@ -854,6 +856,8 @@ static void __copy_skb_header(struct sk_buff *new, const struct sk_buff *old)
 	 * It is not yet because we do not want to have a 16 bit hole
 	 */
 	new->queue_mapping = old->queue_mapping;
+
+	pfmemalloc = new->pfmemalloc;
 
 	memcpy(&new->headers_start, &old->headers_start,
 	       offsetof(struct sk_buff, headers_end) -
@@ -889,6 +893,7 @@ static void __copy_skb_header(struct sk_buff *new, const struct sk_buff *old)
 #endif
 #endif
 
+	new->pfmemalloc = pfmemalloc;
 }
 
 /*
@@ -910,6 +915,7 @@ static struct sk_buff *__skb_clone(struct sk_buff *n, struct sk_buff *skb)
 	n->cloned = 1;
 	n->nohdr = 0;
 	n->peeked = 0;
+	C(pfmemalloc);
 	n->destructor = NULL;
 	C(tail);
 	C(end);
@@ -3258,6 +3264,7 @@ normal:
 				net_warn_ratelimited(
 					"skb_segment: too many frags: %u %u\n",
 					pos, mss);
+				err = -EINVAL;
 				goto err;
 			}
 
@@ -3294,11 +3301,10 @@ skip_fraglist:
 
 perform_csum_check:
 		if (!csum) {
-			if (skb_has_shared_frag(nskb)) {
-				err = __skb_linearize(nskb);
-				if (err)
-					goto err;
-			}
+			if (skb_has_shared_frag(nskb) &&
+			    __skb_linearize(nskb))
+				goto err;
+
 			if (!nskb->remcsum_offload)
 				nskb->ip_summed = CHECKSUM_NONE;
 			SKB_GSO_CB(nskb)->csum =
