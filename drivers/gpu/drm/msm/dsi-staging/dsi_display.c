@@ -1153,9 +1153,7 @@ int dsi_display_set_power(struct drm_connector *connector,
 		    printk(KERN_ERR"Turn off AOD MODE aod_mode start\n");
 			display->panel->aod_status=0;
 			display->panel->aod_curr_mode = 0;
-			SDE_ATRACE_BEGIN("DSI_CMD_SET_AOD_OFF");
-			rc = dsi_panel_tx_cmd_set_op(display->panel, DSI_CMD_SET_AOD_OFF);
-			SDE_ATRACE_END("DSI_CMD_SET_AOD_OFF");
+			rc = dsi_panel_enable(display->panel);
 			 printk(KERN_ERR"Turn off AOD MODE aod_mode end\n");
 			} else if ((power_mode == SDE_MODE_DPMS_OFF)
 		        && display->panel->aod_status){
