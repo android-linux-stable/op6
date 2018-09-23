@@ -52,6 +52,7 @@ struct fsa4480 {
 	wait_queue_head_t wq;
 	struct device *dev;
 	int mbhc_en;
+	struct delayed_work call_wcd_dwork;
 };
 
 /*2018/06/14 @bsp add for support notify audio adapter switch*/
