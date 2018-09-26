@@ -26,7 +26,11 @@ static inline void power_supply_init_attrs(struct device_type *dev_type) {}
 
 #endif /* CONFIG_SYSFS */
 
+#ifdef CONFIG_HOUSTON
 extern void ht_register_power_supply(struct power_supply *psy);
+#else
+static inline void ht_register_power_supply(struct power_supply *psy) {}
+#endif /* CONFIG_HOUSTON */
 
 #ifdef CONFIG_LEDS_TRIGGERS
 
