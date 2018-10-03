@@ -85,7 +85,6 @@ struct lpm_debug {
 static DEFINE_SPINLOCK(bc_timer_lock);
 
 static struct system_pm_ops *sys_pm_ops;
-static DEFINE_SPINLOCK(bc_timer_lock);
 
 struct lpm_cluster *lpm_root_node;
 
