@@ -2747,8 +2747,6 @@ static void venus_hfi_pm_handler(struct work_struct *work)
 {
 	int rc = 0;
 	u32 wfi_status = 0, idle_status = 0, pc_ready = 0;
-	//int count = 0;
-	//guoguangyi,2018/8/20,qcom's patch
 	int pc_count = 0, idle_count = 0;
 	const int max_tries = 10;
 	struct venus_hfi_device *device = list_first_entry(
@@ -2798,8 +2796,6 @@ static void venus_hfi_pm_handler(struct work_struct *work)
 				wfi_status);
 			goto skip_power_off;
 		}
-		//int count = 0;
-		//guoguangyi,2018/8/20,qcom's patch
 		while (device->res->sys_idle_indicator &&
 				idle_count < max_tries) {
 			if (idle_status & BIT(30))
@@ -2810,8 +2806,6 @@ static void venus_hfi_pm_handler(struct work_struct *work)
 			idle_count++;
 		}
 		if (idle_count == max_tries) {
-		//if (device->res->sys_idle_indicator &&
-		//	!(idle_status & BIT(30))) {
 			dprintk(VIDC_WARN,
 				"Skipping PC as idle_status (%#x) bit not set\n",
 				idle_status);
@@ -2823,9 +2817,8 @@ static void venus_hfi_pm_handler(struct work_struct *work)
 			dprintk(VIDC_WARN, "Failed PC %d\n", rc);
 			goto skip_power_off;
 		}
-		//guoguangyi,2018/8/20,qcom's patch
+
 		while (pc_count < max_tries) {
-		//while (count < max_tries) {
 			wfi_status = __read_register(device,
 					VIDC_WRAPPER_CPU_STATUS);
 			pc_ready = __read_register(device,
@@ -2834,13 +2827,9 @@ static void venus_hfi_pm_handler(struct work_struct *work)
 				VIDC_CPU_CS_SCIACMDARG0_HFI_CTRL_PC_READY))
 				break;
 			usleep_range(150, 250);
-			//guoguangyi,2018/8/20,qcom's patch
-			//count++;
 			pc_count++;
 		}
 
-		//guoguangyi,2018/8/20,qcom's patch
-		//if (count == max_tries) {
 		if (pc_count == max_tries) {
 			dprintk(VIDC_ERR,
 					"Skip PC. Core is not in right state (%#x, %#x)\n",
