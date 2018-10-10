@@ -86,7 +86,6 @@ static DEFINE_SPINLOCK(bc_timer_lock);
 
 static struct system_pm_ops *sys_pm_ops;
 
-
 struct lpm_cluster *lpm_root_node;
 
 #define MAXSAMPLES 5
@@ -1217,13 +1216,12 @@ static void cluster_unprepare(struct lpm_cluster *cluster,
 
 	level = &cluster->levels[cluster->last_level];
 
-	if (level->notify_rpm) {
+	if (level->notify_rpm)
 		if (sys_pm_ops && sys_pm_ops->exit) {
 			spin_lock(&bc_timer_lock);
 			sys_pm_ops->exit();
 			spin_unlock(&bc_timer_lock);
 		}
-	}
 
 	update_debug_pc_event(CLUSTER_EXIT, cluster->last_level,
 			cluster->num_children_in_sync.bits[0],

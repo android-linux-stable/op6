@@ -159,6 +159,7 @@ enum msm_mdp_crtc_property {
 	CRTC_PROP_CAPTURE_OUTPUT,
 
 	CRTC_PROP_ENABLE_SUI_ENHANCEMENT,
+        CRTC_PROP_IDLE_PC_STATE,
 	CRTC_PROP_CUSTOM,
 
 	/* total # of properties */

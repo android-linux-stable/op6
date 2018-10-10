@@ -36,10 +36,6 @@
 #include "tune.h"
 #include "walt.h"
 #include <trace/events/sched.h>
-/* Curtis, 20180111, ux realm*/
-#include <../drivers/oneplus/coretech/opchain/opchain_helper.h>
-
-#define opc_claim_bit_test(claim, cpu) (claim & ((1 << cpu) | (1 << (cpu + num_present_cpus()))))
 
 #ifdef CONFIG_SCHED_WALT
 
@@ -688,6 +684,7 @@ int sched_proc_update_handler(struct ctl_table *table, int write,
 
 	return 0;
 }
+#endif
 
 /*
  * delta /= w
@@ -4870,8 +4867,7 @@ enqueue_task_fair(struct rq *rq, struct task_struct *p, int flags)
 #ifdef CONFIG_SMP
 	int task_new = flags & ENQUEUE_WAKEUP_NEW;
 #endif
-/* Curtis, 20180111, ux realm*/
-	opc_task_switch(true, cpu_of(rq), p, 0);
+
 #ifdef CONFIG_SCHED_WALT
 	p->misfit = !task_fits_max(p, rq->cpu);
 #endif
@@ -4966,8 +4962,6 @@ static void dequeue_task_fair(struct rq *rq, struct task_struct *p, int flags)
 	struct sched_entity *se = &p->se;
 	int task_sleep = flags & DEQUEUE_SLEEP;
 
-	/* Curtis, 20180111, ux realm*/
-	opc_task_switch(false, cpu_of(rq), p, rq->clock);
 	for_each_sched_entity(se) {
 		cfs_rq = cfs_rq_of(se);
 		dequeue_entity(cfs_rq, se, flags);
@@ -6201,13 +6195,14 @@ schedtune_margin(unsigned long signal, long boost)
 	if (boost >= 0) {
 		margin  = SCHED_CAPACITY_SCALE - signal;
 		margin *= boost;
-	} else
+	} else {
 		margin = -signal * boost;
+	}
 
 	margin  = reciprocal_divide(margin, schedtune_spc_rdiv);
-
 	if (boost < 0)
 		margin *= -1;
+
 	return margin;
 }
 
@@ -6831,8 +6826,6 @@ struct find_best_target_env {
 	bool need_idle;
 	bool placement_boost;
 	bool avoid_prev_cpu;
-	/* Curtis, 20180111, ux realm*/
-	int op_path;
 };
 
 #ifdef CONFIG_SCHED_WALT
@@ -6939,6 +6932,7 @@ static inline int find_best_target(struct task_struct *p, int *backup_cpu,
 	int cpu, i;
 	unsigned int active_cpus_count = 0;
 	int isolated_candidate = -1;
+	int prev_cpu = task_cpu(p);
 
 	*backup_cpu = -1;
 
@@ -6985,27 +6979,24 @@ retry:
 
 			cpumask_clear_cpu(i, &search_cpus);
 
+			trace_sched_cpu_util(i);
 			if (!cpu_online(i) || cpu_isolated(i))
 				continue;
 
 			isolated_candidate = i;
 
-			if (avoid_prev_cpu && i == task_cpu(p))
+			if (avoid_prev_cpu && i == prev_cpu)
 				continue;
 
 			if (walt_cpu_high_irqload(i) || is_reserved(i))
 				continue;
-
-			trace_sched_cpu_util(i);
 
 			/*
 			 * p's blocked utilization is still accounted for on prev_cpu
 			 * so prev_cpu will receive a negative bias due to the double
 			 * accounting. However, the blocked utilization may be zero.
 			 */
-			/* Curtis, 20180111, ux realm*/
-			wake_util = opc_cpu_util(cpu_util_wake(i, p),
-						i, p, fbt_env->op_path);
+			wake_util = cpu_util_wake(i, p);
 			new_util = wake_util + task_util(p);
 
 			/*
@@ -7068,7 +7059,8 @@ retry:
 					trace_sched_find_best_target(p,
 							prefer_idle, min_util,
 							cpu, best_idle_cpu,
-							best_active_cpu, i);
+							best_active_cpu,
+							i, -1);
 
 					return i;
 				}
@@ -7245,13 +7237,13 @@ retry:
 
 	if (best_idle_cpu != -1 && !is_packing_eligible(p, target_cpu, fbt_env,
 					active_cpus_count, best_idle_cstate)) {
-		if (target_cpu == task_cpu(p))
+		if (target_cpu == prev_cpu)
 			fbt_env->avoid_prev_cpu = true;
 
 		target_cpu = best_idle_cpu;
 		best_idle_cpu = -1;
 	}
-	trace_printk("%s-%d target %d\n", p->comm, p->pid, target_cpu);
+
 	/*
 	 * For non latency sensitive tasks, cases B and C in the previous loop,
 	 * we pick the best IDLE CPU only if we was not able to find a target
@@ -7281,15 +7273,31 @@ retry:
 		? best_active_cpu
 		: best_idle_cpu;
 
-	if (target_cpu == -1 && cpu_isolated(task_cpu(p)) &&
+	if (target_cpu == -1 && cpu_isolated(prev_cpu) &&
 			isolated_candidate != -1) {
 		target_cpu = isolated_candidate;
 		fbt_env->avoid_prev_cpu = true;
 	}
 
+	/*
+	 * - It is possible for target and backup
+	 *   to select same CPU - if so, drop backup
+	 *
+	 * - The next step of energy evaluation includes
+	 *   prev_cpu. Drop target or backup if it is
+	 *   same as prev_cpu.
+	 */
+	if (*backup_cpu == target_cpu || *backup_cpu == prev_cpu)
+		*backup_cpu = -1;
+
+	if (target_cpu == prev_cpu) {
+		target_cpu = *backup_cpu;
+		*backup_cpu = -1;
+	}
+
 	trace_sched_find_best_target(p, prefer_idle, min_util, cpu,
 				     best_idle_cpu, best_active_cpu,
-				     target_cpu);
+				     target_cpu, *backup_cpu);
 
 	schedstat_inc(p->se.statistics.nr_wakeups_fbt_count);
 	schedstat_inc(this_rq()->eas_stats.fbt_count);
@@ -7414,13 +7422,6 @@ static int select_energy_cpu_brute(struct task_struct *p, int prev_cpu, int sync
 	struct find_best_target_env fbt_env;
 	u64 start_t = 0;
 	int fastpath = 0;
-	/* Curtis, 20180111, ux realm*/
-	bool is_uxtop = is_opc_task(p, UT_FORE);
-
-	fbt_env.op_path = opc_select_path(current, p, prev_cpu);
-
-	if (fbt_env.op_path >= 0)
-		prev_cpu = fbt_env.op_path;
 
 	if (trace_sched_task_util_enabled())
 		start_t = sched_clock();
@@ -7431,8 +7432,6 @@ static int select_energy_cpu_brute(struct task_struct *p, int prev_cpu, int sync
 #ifdef CONFIG_CGROUP_SCHEDTUNE
 	boosted = schedtune_task_boost(p) > 0;
 	prefer_idle = schedtune_prefer_idle(p) > 0;
-	/* Curtis, 20180111, ux realm*/
-	boosted |= (fbt_env.op_path >= 4);
 #else
 	boosted = get_sysctl_sched_cfs_boost() > 0;
 	prefer_idle = 0;
@@ -7455,9 +7454,8 @@ static int select_energy_cpu_brute(struct task_struct *p, int prev_cpu, int sync
 
 	if (sysctl_sched_sync_hint_enable && sync) {
 		int cpu = smp_processor_id();
-		/* Curtis, 20180111, ux realm*/
-		if (bias_to_waker_cpu(p, cpu, rtg_target) &&
-			(!is_uxtop || cpu >= FIRST_BIG_CORE)) {
+
+		if (bias_to_waker_cpu(p, cpu, rtg_target)) {
 			schedstat_inc(p->se.statistics.nr_wakeups_secb_sync);
 			schedstat_inc(this_rq()->eas_stats.secb_sync);
 			target_cpu = cpu;
@@ -7472,16 +7470,10 @@ static int select_energy_cpu_brute(struct task_struct *p, int prev_cpu, int sync
 		goto out;
 	}
 
-	rcu_read_lock();
-	/* Curtis, 20180111, ux realm*/
-	if (fbt_env.op_path >= 0)
-		sd = rcu_dereference(per_cpu(sd_ea, fbt_env.op_path));
-	else
 	sd = rcu_dereference(per_cpu(sd_ea, prev_cpu));
-
 	if (!sd) {
 		target_cpu = prev_cpu;
-		goto unlock;
+		goto out;
 	}
 
 	sync_entity_load_avg(&p->se);
@@ -7491,14 +7483,14 @@ static int select_energy_cpu_brute(struct task_struct *p, int prev_cpu, int sync
 				    &fbt_env);
 	if (next_cpu == -1) {
 		target_cpu = prev_cpu;
-		goto unlock;
+		goto out;
 	}
 
 	if (fbt_env.placement_boost || fbt_env.need_idle ||
 			fbt_env.avoid_prev_cpu || (rtg_target &&
 			!cpumask_test_cpu(prev_cpu, rtg_target))) {
 		target_cpu = next_cpu;
-		goto unlock;
+		goto out;
 	}
 
 	/* Unconditionally prefer IDLE CPUs for boosted/prefer_idle tasks */
@@ -7506,7 +7498,7 @@ static int select_energy_cpu_brute(struct task_struct *p, int prev_cpu, int sync
 		schedstat_inc(p->se.statistics.nr_wakeups_secb_idle_bt);
 		schedstat_inc(this_rq()->eas_stats.secb_idle_bt);
 		target_cpu = next_cpu;
-		goto unlock;
+		goto out;
 	}
 
 	target_cpu = prev_cpu;
@@ -7540,7 +7532,7 @@ static int select_energy_cpu_brute(struct task_struct *p, int prev_cpu, int sync
 			schedstat_inc(p->se.statistics.nr_wakeups_secb_insuff_cap);
 			schedstat_inc(this_rq()->eas_stats.secb_insuff_cap);
 			target_cpu = next_cpu;
-			goto unlock;
+			goto out;
 		}
 
 		/* Check if EAS_CPU_NXT is a more energy efficient CPU */
@@ -7548,20 +7540,18 @@ static int select_energy_cpu_brute(struct task_struct *p, int prev_cpu, int sync
 			schedstat_inc(p->se.statistics.nr_wakeups_secb_nrg_sav);
 			schedstat_inc(this_rq()->eas_stats.secb_nrg_sav);
 			target_cpu = eenv.cpu[eenv.next_idx].cpu_id;
-			goto unlock;
+			goto out;
 		}
 
 		schedstat_inc(p->se.statistics.nr_wakeups_secb_no_nrg_sav);
 		schedstat_inc(this_rq()->eas_stats.secb_no_nrg_sav);
 		target_cpu = prev_cpu;
-		goto unlock;
+		goto out;
 	}
 
 	schedstat_inc(p->se.statistics.nr_wakeups_secb_count);
 	schedstat_inc(this_rq()->eas_stats.secb_count);
 
-unlock:
-	rcu_read_unlock();
 out:
 	trace_sched_task_util(p, next_cpu, backup_cpu, target_cpu, sync,
 			      fbt_env.need_idle, fastpath,
@@ -7597,8 +7587,12 @@ select_task_rq_fair(struct task_struct *p, int prev_cpu, int sd_flag, int wake_f
 			cpumask_test_cpu(cpu, tsk_cpus_allowed(p)));
 	}
 
-	if (energy_aware())
-		return select_energy_cpu_brute(p, prev_cpu, sync);
+	if (energy_aware()) {
+		rcu_read_lock();
+		new_cpu = select_energy_cpu_brute(p, prev_cpu, sync);
+		rcu_read_unlock();
+		return new_cpu;
+	}
 
 	rcu_read_lock();
 	for_each_domain(cpu, tmp) {
@@ -8205,9 +8199,6 @@ enum group_type {
 #define LBF_IGNORE_BIG_TASKS 0x100
 #define LBF_IGNORE_PREFERRED_CLUSTER_TASKS 0x200
 #define LBF_MOVED_RELATED_THREAD_GROUP_TASK 0x400
-#define LBF_IGNORE_UX_TOP 0x800
-#define LBF_IGNORE_SLAVE 0xC00
-
 
 struct lb_env {
 	struct sched_domain	*sd;
@@ -8404,13 +8395,6 @@ int can_migrate_task(struct task_struct *p, struct lb_env *env)
 		return 0;
 #endif
 
-	/* Curtis, 20180111, ux realm*/
-	if (env->flags & LBF_IGNORE_UX_TOP && is_opc_task(p, UT_FORE))
-		return 0;
-
-	if (env->flags & LBF_IGNORE_SLAVE && p->utask_slave)
-		return 0;
-
 	if (task_running(env->src_rq, p)) {
 		schedstat_inc(p->se.statistics.nr_failed_migrations_running);
 		return 0;
@@ -8501,8 +8485,6 @@ static int detach_tasks(struct lb_env *env)
 	unsigned long load;
 	int detached = 0;
 	int orig_loop = env->loop;
-	/* Curtis, 20180111, ux realm*/
-	int src_claim = opc_get_claim_on_cpu(env->src_cpu);
 
 	lockdep_assert_held(&env->src_rq->lock);
 
@@ -8512,14 +8494,8 @@ static int detach_tasks(struct lb_env *env)
 	if (!same_cluster(env->dst_cpu, env->src_cpu))
 		env->flags |= LBF_IGNORE_PREFERRED_CLUSTER_TASKS;
 
-	/* Curtis, 20180111, ux realm*/
-	if (cpu_capacity(env->dst_cpu) < cpu_capacity(env->src_cpu)) {
+	if (cpu_capacity(env->dst_cpu) < cpu_capacity(env->src_cpu))
 		env->flags |= LBF_IGNORE_BIG_TASKS;
-		if (src_claim == 1)
-			env->flags |= LBF_IGNORE_UX_TOP | LBF_IGNORE_SLAVE;
-		else if (src_claim == -1)
-			env->flags |= LBF_IGNORE_SLAVE;
-	}
 
 redo:
 	while (!list_empty(tasks)) {
@@ -8588,8 +8564,6 @@ next:
 		tasks = &env->src_rq->cfs_tasks;
 		env->flags &= ~(LBF_IGNORE_BIG_TASKS |
 				LBF_IGNORE_PREFERRED_CLUSTER_TASKS);
-		if (env->flags & LBF_IGNORE_SLAVE)
-			env->flags &= ~LBF_IGNORE_SLAVE;
 		env->loop = orig_loop;
 		goto redo;
 	}
@@ -10567,8 +10541,12 @@ static inline int find_new_ilb(int type)
 	rcu_read_lock();
 	sd = rcu_dereference_check_sched_domain(rq->sd);
 	if (sd) {
-		cpumask_and(&cpumask, nohz.idle_cpus_mask,
-			    sched_domain_span(sd));
+		if (energy_aware() && rq->misfit_task)
+			cpumask_andnot(&cpumask, nohz.idle_cpus_mask,
+				sched_domain_span(sd));
+		else
+			cpumask_and(&cpumask, nohz.idle_cpus_mask,
+				    sched_domain_span(sd));
 		cpumask_andnot(&cpumask, &cpumask,
 			    cpu_isolated_mask);
 		ilb = cpumask_first(&cpumask);
@@ -10579,7 +10557,7 @@ static inline int find_new_ilb(int type)
 		if (!energy_aware() ||
 		    (capacity_orig_of(cpu) ==
 		     cpu_rq(cpu)->rd->max_cpu_capacity.val ||
-		     cpu_overutilized(cpu))) {
+		     (cpu_overutilized(cpu) && rq->nr_running > 1))) {
 			cpumask_andnot(&cpumask, nohz.idle_cpus_mask,
 			    cpu_isolated_mask);
 			ilb = cpumask_first(&cpumask);

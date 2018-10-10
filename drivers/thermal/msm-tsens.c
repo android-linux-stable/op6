@@ -203,7 +203,7 @@ static int tsens_thermal_zone_register(struct tsens_device *tmdev)
 				continue;
 			}
 			/* cache sensor tzd to houston */
-			ht_register_thermal_zone_device(tmdev->sensor[i].tzd);
+			//ht_register_thermal_zone_device(tmdev->sensor[i].tzd);
 		} else {
 			pr_debug("Sensor not enabled:%d\n", i);
 		}

@@ -1472,6 +1472,9 @@ static int qpnp_lbc_configure_jeita(struct qpnp_lbc_chip *chip,
 		return -EINVAL;
 	}
 
+	if (chip->cfg_use_fake_battery)
+		return 0;
+
 	mutex_lock(&chip->jeita_configure_lock);
 	switch (psp) {
 	case POWER_SUPPLY_PROP_COOL_TEMP:
@@ -2634,15 +2637,15 @@ static irqreturn_t qpnp_lbc_batt_pres_irq_handler(int irq, void *_chip)
 		power_supply_changed(chip->batt_psy);
 
 		if ((chip->cfg_cool_bat_decidegc
-					|| chip->cfg_warm_bat_decidegc)
-					&& batt_present) {
+			|| chip->cfg_warm_bat_decidegc)
+			&& batt_present && !chip->cfg_use_fake_battery) {
 			pr_debug("enabling vadc notifications\n");
 			if (qpnp_adc_tm_channel_measure(chip->adc_tm_dev,
 						&chip->adc_param))
 				pr_err("request ADC error\n");
 		} else if ((chip->cfg_cool_bat_decidegc
-					|| chip->cfg_warm_bat_decidegc)
-					&& !batt_present) {
+			|| chip->cfg_warm_bat_decidegc)
+			&& !batt_present && !chip->cfg_use_fake_battery) {
 			qpnp_adc_tm_disable_chan_meas(chip->adc_tm_dev,
 					&chip->adc_param);
 			pr_debug("disabling vadc notifications\n");
@@ -2877,7 +2880,8 @@ static int qpnp_lbc_request_irqs(struct qpnp_lbc_chip *chip)
 			IRQF_TRIGGER_RISING | IRQF_TRIGGER_FALLING, 1);
 
 	REQUEST_IRQ(chip, USBIN_VALID, rc, usbin_valid, 1,
-			IRQF_TRIGGER_RISING | IRQF_TRIGGER_FALLING, 1);
+			IRQF_TRIGGER_RISING | IRQF_TRIGGER_FALLING
+			| IRQF_ONESHOT, 1);
 
 	REQUEST_IRQ(chip, USB_CHG_GONE, rc, chg_gone, 0,
 			IRQF_TRIGGER_RISING, 1);
@@ -3397,7 +3401,7 @@ static int qpnp_lbc_main_probe(struct platform_device *pdev)
 	}
 
 	if ((chip->cfg_cool_bat_decidegc || chip->cfg_warm_bat_decidegc)
-			&& chip->bat_if_base) {
+			&& chip->bat_if_base && !chip->cfg_use_fake_battery) {
 		chip->adc_param.low_temp = chip->cfg_cool_bat_decidegc;
 		chip->adc_param.high_temp = chip->cfg_warm_bat_decidegc;
 		chip->adc_param.timer_interval = ADC_MEAS1_INTERVAL_1S;

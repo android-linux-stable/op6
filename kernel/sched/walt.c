@@ -29,7 +29,6 @@
 #include "walt.h"
 
 #include <trace/events/sched.h>
-#include "../drivers/oneplus/coretech/opchain/opchain_helper.h"
 
 const char *task_event_names[] = {"PUT_PREV_TASK", "PICK_NEXT_TASK",
 				  "TASK_WAKE", "TASK_MIGRATE", "TASK_UPDATE",
@@ -88,11 +87,16 @@ late_initcall(sched_init_ops);
 static void acquire_rq_locks_irqsave(const cpumask_t *cpus,
 				     unsigned long *flags)
 {
-	int cpu;
+	int cpu, level = 0;
 
 	local_irq_save(*flags);
-	for_each_cpu(cpu, cpus)
-		raw_spin_lock(&cpu_rq(cpu)->lock);
+	for_each_cpu(cpu, cpus) {
+		if (level == 0)
+			raw_spin_lock(&cpu_rq(cpu)->lock);
+		else
+			raw_spin_lock_nested(&cpu_rq(cpu)->lock, level);
+		level++;
+	}
 }
 
 static void release_rq_locks_irqrestore(const cpumask_t *cpus,
@@ -702,14 +706,11 @@ static inline void inter_cluster_migration_fixup
 	BUG_ON((s64)src_rq->nt_curr_runnable_sum < 0);
 }
 
-static int load_to_index(u32 load)
+static u32 load_to_index(u32 load)
 {
-	if (load < sched_load_granule)
-		return 0;
-	else if (load >= sched_ravg_window)
-		return NUM_LOAD_INDICES - 1;
-	else
-		return load / sched_load_granule;
+	u32 index = load / sched_load_granule;
+
+	return min(index, (u32)(NUM_LOAD_INDICES - 1));
 }
 
 static void
@@ -1717,8 +1718,7 @@ static void update_history(struct rq *rq, struct task_struct *p,
 
 	if (sched_window_stats_policy == WINDOW_STATS_RECENT) {
 		demand = runtime;
-	} else if (sched_window_stats_policy == WINDOW_STATS_MAX ||
-	    ((likely(opc_boost_tl) && *opc_boost_tl) && task_cpu(p) >= 4)) {
+	} else if (sched_window_stats_policy == WINDOW_STATS_MAX) {
 		demand = max;
 	} else {
 		avg = div64_u64(sum, sched_ravg_hist_size);
@@ -1759,11 +1759,6 @@ done:
 
 static u64 add_to_task_demand(struct rq *rq, struct task_struct *p, u64 delta)
 {
-	if (p->compensate_need) {
-		delta += p->compensate_time;
-		p->compensate_time = 0;
-		p->compensate_need = 0;
-	}
 	delta = scale_exec_time(delta, rq);
 	p->ravg.sum += delta;
 	if (unlikely(p->ravg.sum > sched_ravg_window))
@@ -1951,8 +1946,6 @@ static inline void run_walt_irq_work(u64 old_window_start, struct rq *rq)
 	if (result == old_window_start)
 		irq_work_queue(&walt_cpufreq_irq_work);
 }
-
-
 
 /* Reflect task activity on its demand and cpu's busy time statistics */
 void update_task_ravg(struct task_struct *p, struct rq *rq, int event,
@@ -2691,7 +2684,7 @@ int update_preferred_cluster(struct related_thread_group *grp,
 {
 	u32 new_load = task_load(p);
 
-	if (!grp || !p->grp)
+	if (!grp)
 		return 0;
 
 	/*
@@ -3182,13 +3175,19 @@ void walt_irq_work(struct irq_work *irq_work)
 	u64 wc;
 	int flag = SCHED_CPUFREQ_WALT;
 	bool is_migration = false;
+	int level = 0;
 
 	/* Am I the window rollover work or the migration work? */
 	if (irq_work == &walt_migration_irq_work)
 		is_migration = true;
 
-	for_each_cpu(cpu, cpu_possible_mask)
-		raw_spin_lock(&cpu_rq(cpu)->lock);
+	for_each_cpu(cpu, cpu_possible_mask) {
+		if (level == 0)
+			raw_spin_lock(&cpu_rq(cpu)->lock);
+		else
+			raw_spin_lock_nested(&cpu_rq(cpu)->lock, level);
+		level++;
+	}
 
 	wc = sched_ktime_clock();
 	walt_load_reported_window = atomic64_read(&walt_irq_work_lastq_ws);

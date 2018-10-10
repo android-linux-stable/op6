@@ -806,7 +806,7 @@ __power_supply_register(struct device *parent,
 			   &psy->deferred_register_work,
 			   POWER_SUPPLY_DEFERRED_REGISTER_TIME);
 
-	ht_register_power_supply(psy);
+	//ht_register_power_supply(psy);
 
 	return psy;
 

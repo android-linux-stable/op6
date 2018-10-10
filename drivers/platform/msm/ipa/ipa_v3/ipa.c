@@ -2536,6 +2536,9 @@ void ipa3_q6_pre_shutdown_cleanup(void)
 
 	ipa3_q6_pipe_delay(true);
 	ipa3_q6_avoid_holb();
+	if (ipa3_ctx->ipa_config_is_mhi)
+		ipa3_set_reset_client_cons_pipe_sus_holb(true,
+		IPA_CLIENT_MHI_CONS);
 	if (ipa3_q6_clean_q6_tables()) {
 		IPAERR("Failed to clean Q6 tables\n");
 		BUG();
@@ -2548,8 +2551,11 @@ void ipa3_q6_pre_shutdown_cleanup(void)
 	 * on pipe reset procedure
 	 */
 	ipa3_q6_pipe_delay(false);
-
-	ipa3_set_usb_prod_pipe_delay();
+	ipa3_set_reset_client_prod_pipe_delay(true,
+		IPA_CLIENT_USB_PROD);
+	if (ipa3_ctx->ipa_config_is_mhi)
+		ipa3_set_reset_client_prod_pipe_delay(true,
+		IPA_CLIENT_MHI_PROD);
 
 	IPA_ACTIVE_CLIENTS_DEC_SIMPLE();
 	IPADBG_LOW("Exit with success\n");
@@ -5018,7 +5024,7 @@ static int ipa3_pre_init(const struct ipa3_plat_drv_res *resource_p,
 
 	ipa3_ctx->logbuf = ipc_log_context_create(IPA_IPC_LOG_PAGES, "ipa", 0);
 	if (ipa3_ctx->logbuf == NULL)
-		IPAERR("failed to create IPC log, continue...\n");
+		IPADBG("failed to create IPC log, continue...\n");
 
 	/* ipa3_ctx->pdev and ipa3_ctx->uc_pdev will be set in the smmu probes*/
 	ipa3_ctx->master_pdev = ipa_pdev;
@@ -6205,15 +6211,17 @@ static int ipa_smmu_ap_cb_probe(struct device *dev)
 		}
 		IPADBG("AP/USB SMMU atomic set\n");
 
-		if (iommu_domain_set_attr(cb->mapping->domain,
+		if (smmu_info.fast_map) {
+			if (iommu_domain_set_attr(cb->mapping->domain,
 				DOMAIN_ATTR_FAST,
 				&fast)) {
-			IPAERR("couldn't set fast map\n");
-			arm_iommu_release_mapping(cb->mapping);
-			cb->valid = false;
-			return -EIO;
+				IPAERR("couldn't set fast map\n");
+				arm_iommu_release_mapping(cb->mapping);
+				cb->valid = false;
+				return -EIO;
+			}
+			IPADBG("SMMU fast map set\n");
 		}
-		IPADBG("SMMU fast map set\n");
 	}
 
 	pr_info("IPA smmu_info.s1_bypass_arr[AP]=%d smmu_info.fast_map=%d\n",
