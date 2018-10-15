@@ -4209,6 +4209,12 @@ static QDF_STATUS extract_sar_limit_event_tlv(wmi_unified_t wmi_handle,
 	event->sar_enable = fixed_param->sar_enable;
 	event->num_limit_rows = fixed_param->num_limit_rows;
 
+	if (event->num_limit_rows > param_buf->num_sar_get_limits) {
+		WMI_LOGE(FL("Num rows %d exceeds sar_get_limits rows len %d"),
+			 event->num_limit_rows, param_buf->num_sar_get_limits);
+		return QDF_STATUS_E_INVAL;
+	}
+
 	if (event->num_limit_rows > MAX_SAR_LIMIT_ROWS_SUPPORTED) {
 		QDF_ASSERT(0);
 		WMI_LOGE(FL("Num rows %d exceeds max of %d"),
@@ -8976,7 +8982,7 @@ QDF_STATUS send_aggr_qos_cmd_tlv(wmi_unified_t wmi_handle,
 			       WMITLV_TAG_STRUC_wmi_vdev_wmm_addts_cmd_fixed_param,
 			       WMITLV_GET_STRUCT_TLVLEN
 				       (wmi_vdev_wmm_addts_cmd_fixed_param));
-			cmd->vdev_id = aggr_qos_rsp_msg->sessionId;
+			cmd->vdev_id = aggr_qos_rsp_msg->vdev_id;
 			cmd->ac =
 				WMI_TID_TO_AC(aggr_qos_rsp_msg->tspec[i].tsinfo.
 					      traffic.userPrio);
@@ -13882,7 +13888,16 @@ static QDF_STATUS extract_channel_hopping_event_tlv(wmi_unified_t wmi_handle,
 static bool is_management_record_tlv(uint32_t cmd_id)
 {
 	if ((cmd_id == WMI_MGMT_TX_SEND_CMDID) ||
-			(cmd_id == WMI_MGMT_TX_COMPLETION_EVENTID))
+	    (cmd_id == WMI_MGMT_TX_COMPLETION_EVENTID) ||
+	    (cmd_id == WMI_MGMT_RX_EVENTID))
+		return true;
+
+	return false;
+}
+
+static bool is_diag_event_tlv(uint32_t event_id)
+{
+	if (WMI_DIAG_EVENTID == event_id)
 		return true;
 
 	return false;
@@ -15979,6 +15994,8 @@ void wmi_tlv_attach(wmi_unified_t wmi_handle)
 	wmi_handle->log_info.buf_offset_event = 4;
 	wmi_handle->log_info.is_management_record =
 		is_management_record_tlv;
+	wmi_handle->log_info.is_diag_event =
+		is_diag_event_tlv;
 #endif
 	populate_tlv_service(wmi_handle->services);
 	populate_tlv_events_id(wmi_handle->wmi_events);
@@ -15994,6 +16011,8 @@ void wmi_tlv_attach(wmi_unified_t wmi_handle)
 	wmi_handle->log_info.buf_offset_event = 4;
 	wmi_handle->log_info.is_management_record =
 		is_management_record_tlv;
+	wmi_handle->log_info.is_diag_event =
+		is_diag_event_tlv;
 #endif
 }
 #endif
