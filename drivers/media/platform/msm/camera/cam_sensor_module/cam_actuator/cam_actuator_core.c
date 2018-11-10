@@ -826,7 +826,6 @@ int32_t cam_actuator_flush_request(struct cam_req_mgr_flush_request *flush_req)
 		return -EINVAL;
 	}
 
-	/* PATCH, add by xcb */
 	if (a_ctrl->i2c_data.per_frame == NULL) {
 		CAM_ERR(CAM_ACTUATOR, "i2c frame data is NULL");
 		return -EINVAL;

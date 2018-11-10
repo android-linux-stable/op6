@@ -3991,6 +3991,7 @@ static QDF_STATUS sap_fsm_state_dfs_cac_wait(ptSapContext sap_ctx,
 					continue;
 				/* SAP to be moved to DISCONNECTING state */
 				t_sap_ctx->sapsMachine = eSAP_DISCONNECTING;
+				t_sap_ctx->is_chan_change_inprogress = true;
 				/*
 				 * eSAP_DFS_CHANNEL_CAC_RADAR_FOUND:
 				 * A Radar is found on current DFS Channel
@@ -4305,9 +4306,17 @@ static QDF_STATUS sap_fsm_state_disconnecting(ptSapContext sap_ctx,
 			  "eSAP_DISCONNECTING", "eSAP_DISCONNECTED");
 		sap_ctx->sapsMachine = eSAP_DISCONNECTED;
 
-		qdf_status = sap_signal_hdd_event(sap_ctx, NULL,
-				eSAP_STOP_BSS_EVENT,
-				(void *)eSAP_STATUS_SUCCESS);
+		/* Close the SME session */
+		if (true == sap_ctx->isSapSessionOpen) {
+			sap_ctx->isSapSessionOpen = false;
+			qdf_status = sap_close_session(hal, sap_ctx,
+					sap_roam_session_close_callback, true);
+			if (!QDF_IS_STATUS_SUCCESS(qdf_status)) {
+				qdf_status = sap_signal_hdd_event(sap_ctx, NULL,
+						eSAP_STOP_BSS_EVENT,
+						(void *)eSAP_STATUS_SUCCESS);
+			}
+		}
 	} else if (msg == eWNI_SME_CHANNEL_CHANGE_REQ) {
 		QDF_TRACE(QDF_MODULE_ID_SAP, QDF_TRACE_LEVEL_INFO_MED,
 			  FL("sapdfs: Send channel change request on sapctx[%pK]"),

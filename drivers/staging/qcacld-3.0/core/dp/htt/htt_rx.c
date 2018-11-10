@@ -798,7 +798,7 @@ void htt_rx_detach(struct htt_pdev_t *pdev)
 							   memctx));
 
 	qdf_mem_free_consistent(pdev->osdev, pdev->osdev->dev,
-				   pdev->rx_ring.size * sizeof(qdf_dma_addr_t),
+				   pdev->rx_ring.size * sizeof(target_paddr_t),
 				   pdev->rx_ring.buf.paddrs_ring,
 				   pdev->rx_ring.base_paddr,
 				   qdf_get_dma_mem_context((&pdev->rx_ring.buf),
@@ -3555,10 +3555,7 @@ qdf_nbuf_t htt_rx_hash_list_lookup(struct htt_pdev_t *pdev,
 	if (netbuf == NULL) {
 		qdf_print("rx hash: %s: no entry found for %pK!\n",
 			  __func__, (void *)paddr);
-		if (cds_is_self_recovery_enabled())
-			cds_trigger_recovery(CDS_RX_HASH_NO_ENTRY_FOUND);
-		else
-			HTT_ASSERT_ALWAYS(0);
+		cds_trigger_recovery(CDS_RX_HASH_NO_ENTRY_FOUND);
 	}
 
 	return netbuf;

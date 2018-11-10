@@ -91,7 +91,7 @@ int cam_flash_flush_request(struct cam_req_mgr_flush_request *flush)
 	int rc = 0;
 	int i = 0, j = 0;
 	struct cam_flash_ctrl *fctrl = NULL;
-	int frame_offset = 0;
+	int frm_offset = 0;
 
 	fctrl = (struct cam_flash_ctrl *) cam_get_device_priv(flush->dev_hdl);
 	if (!fctrl) {
@@ -114,13 +114,13 @@ int cam_flash_flush_request(struct cam_req_mgr_flush_request *flush)
 			CAM_ERR(CAM_FLASH, "NonRealTime flush error");
 	} else if (flush->type == CAM_REQ_MGR_FLUSH_TYPE_CANCEL_REQ) {
 	/* flush request with req_id*/
-		frame_offset = flush->req_id % MAX_PER_FRAME_ARRAY;
-		fctrl->per_frame[frame_offset].cmn_attr.request_id = 0;
-		fctrl->per_frame[frame_offset].cmn_attr.is_settings_valid =
+		frm_offset = flush->req_id % MAX_PER_FRAME_ARRAY;
+		fctrl->per_frame[frm_offset].cmn_attr.request_id = 0;
+		fctrl->per_frame[frm_offset].cmn_attr.is_settings_valid =
 			false;
-		fctrl->per_frame[frame_offset].cmn_attr.count = 0;
+		fctrl->per_frame[frm_offset].cmn_attr.count = 0;
 		for (i = 0; i < CAM_FLASH_MAX_LED_TRIGGERS; i++)
-			fctrl->per_frame[frame_offset].led_current_ma[i] = 0;
+			fctrl->per_frame[frm_offset].led_current_ma[i] = 0;
 	}
 	return rc;
 }
@@ -372,7 +372,7 @@ int cam_flash_apply_setting(struct cam_flash_ctrl *fctrl,
 	uint64_t req_id)
 {
 	int rc = 0, i = 0;
-	int frame_offset = 0;
+	int frm_offset = 0;
 	uint16_t num_iterations;
 	struct cam_flash_frame_setting *flash_data = NULL;
 
@@ -485,8 +485,8 @@ int cam_flash_apply_setting(struct cam_flash_ctrl *fctrl,
 			}
 		}
 	} else {
-		frame_offset = req_id % MAX_PER_FRAME_ARRAY;
-		flash_data = &fctrl->per_frame[frame_offset];
+		frm_offset = req_id % MAX_PER_FRAME_ARRAY;
+		flash_data = &fctrl->per_frame[frm_offset];
 
 		if ((flash_data->opcode == CAMERA_SENSOR_FLASH_OP_FIREHIGH) &&
 			(flash_data->cmn_attr.is_settings_valid) &&
@@ -524,8 +524,14 @@ int cam_flash_apply_setting(struct cam_flash_ctrl *fctrl,
 					"Flash off failed %d", rc);
 				goto apply_setting_err;
 			}
+		} else if (flash_data->opcode == CAM_PKT_NOP_OPCODE) {
+			flash_data->opcode = 0;
+			CAM_DBG(CAM_FLASH, "NOP Packet");
 		} else {
-			CAM_DBG(CAM_FLASH, "NOP opcode: req_id: %u", req_id);
+			rc = -EINVAL;
+			CAM_ERR(CAM_FLASH, "Invalid opcode: %d req_id: %llu",
+				flash_data->opcode, req_id);
+			goto apply_setting_err;
 		}
 	}
 
@@ -541,7 +547,7 @@ int cam_flash_parser(struct cam_flash_ctrl *fctrl, void *arg)
 	uint64_t generic_ptr;
 	uint32_t *cmd_buf =  NULL;
 	uint32_t *offset = NULL;
-	uint32_t frame_offset = 0;
+	uint32_t frm_offset = 0;
 	size_t len_of_buffer;
 	struct cam_control *ioctl_ctrl = NULL;
 	struct cam_packet *csl_packet = NULL;
@@ -644,24 +650,24 @@ int cam_flash_parser(struct cam_flash_ctrl *fctrl, void *arg)
 	case CAM_FLASH_PACKET_OPCODE_SET_OPS: {
 		offset = (uint32_t *)((uint8_t *)&csl_packet->payload +
 			csl_packet->cmd_buf_offset);
-		frame_offset = csl_packet->header.request_id %
+		frm_offset = csl_packet->header.request_id %
 			MAX_PER_FRAME_ARRAY;
-		if (fctrl->per_frame[frame_offset].cmn_attr.is_settings_valid
+		if (fctrl->per_frame[frm_offset].cmn_attr.is_settings_valid
 			== true) {
-			fctrl->per_frame[frame_offset].cmn_attr.request_id = 0;
-			fctrl->per_frame[frame_offset].
+			fctrl->per_frame[frm_offset].cmn_attr.request_id = 0;
+			fctrl->per_frame[frm_offset].
 				cmn_attr.is_settings_valid = false;
 			for (i = 0;
-			i < fctrl->per_frame[frame_offset].cmn_attr.count;
+			i < fctrl->per_frame[frm_offset].cmn_attr.count;
 			i++) {
-				fctrl->per_frame[frame_offset].
+				fctrl->per_frame[frm_offset].
 					led_current_ma[i] = 0;
 			}
 		}
 
-		fctrl->per_frame[frame_offset].cmn_attr.request_id =
+		fctrl->per_frame[frm_offset].cmn_attr.request_id =
 			csl_packet->header.request_id;
-		fctrl->per_frame[frame_offset].cmn_attr.is_settings_valid =
+		fctrl->per_frame[frm_offset].cmn_attr.is_settings_valid =
 			true;
 		cmd_desc = (struct cam_cmd_buf_desc *)(offset);
 		rc = cam_mem_get_cpu_buf(cmd_desc->mem_handle,
@@ -683,7 +689,7 @@ int cam_flash_parser(struct cam_flash_ctrl *fctrl, void *arg)
 					CAM_FLASH_STATE_ACQUIRE)) {
 				CAM_WARN(CAM_FLASH,
 					"Rxed Flash fire ops without linking");
-				fctrl->per_frame[frame_offset].
+				fctrl->per_frame[frm_offset].
 					cmn_attr.is_settings_valid = false;
 				return 0;
 			}
@@ -696,13 +702,13 @@ int cam_flash_parser(struct cam_flash_ctrl *fctrl, void *arg)
 				return -EINVAL;
 			}
 
-			fctrl->per_frame[frame_offset].opcode =
+			fctrl->per_frame[frm_offset].opcode =
 				flash_operation_info->opcode;
-			fctrl->per_frame[frame_offset].cmn_attr.count =
+			fctrl->per_frame[frm_offset].cmn_attr.count =
 				flash_operation_info->count;
 			for (i = 0;
 				i < flash_operation_info->count; i++)
-				fctrl->per_frame[frame_offset].
+				fctrl->per_frame[frm_offset].
 					led_current_ma[i]
 					= flash_operation_info->
 					led_current_ma[i];
@@ -806,15 +812,20 @@ int cam_flash_parser(struct cam_flash_ctrl *fctrl, void *arg)
 		break;
 	}
 	case CAM_PKT_NOP_OPCODE: {
+		frm_offset = csl_packet->header.request_id %
+			MAX_PER_FRAME_ARRAY;
 		if ((fctrl->flash_state == CAM_FLASH_STATE_INIT) ||
 			(fctrl->flash_state == CAM_FLASH_STATE_ACQUIRE)) {
 			CAM_WARN(CAM_FLASH,
 				"Rxed NOP packets without linking");
-			fctrl->per_frame[frame_offset].
-				cmn_attr.is_settings_valid = false;
+			fctrl->per_frame[frm_offset].cmn_attr.is_settings_valid
+				= false;
 			return 0;
 		}
 
+		fctrl->per_frame[frm_offset].cmn_attr.is_settings_valid = false;
+		fctrl->per_frame[frm_offset].cmn_attr.request_id = 0;
+		fctrl->per_frame[frm_offset].opcode = CAM_PKT_NOP_OPCODE;
 		CAM_DBG(CAM_FLASH, "NOP Packet is Received: req_id: %u",
 			csl_packet->header.request_id);
 		goto update_req_mgr;
@@ -964,19 +975,15 @@ int cam_flash_apply_request(struct cam_req_mgr_apply_request *apply)
 	fctrl = (struct cam_flash_ctrl *) cam_get_device_priv(apply->dev_hdl);
 	if (!fctrl) {
 		CAM_ERR(CAM_FLASH, "Device data is NULL");
-		rc = -EINVAL;
-		goto free_resource;
+		return -EINVAL;
 	}
 
-	if (!(apply->report_if_bubble)) {
-		mutex_lock(&fctrl->flash_wq_mutex);
-		rc = cam_flash_apply_setting(fctrl, apply->request_id);
-		if (rc)
-			CAM_ERR(CAM_FLASH, "apply_setting failed with rc=%d",
-				rc);
-		mutex_unlock(&fctrl->flash_wq_mutex);
-	}
+	mutex_lock(&fctrl->flash_wq_mutex);
+	rc = cam_flash_apply_setting(fctrl, apply->request_id);
+	if (rc)
+		CAM_ERR(CAM_FLASH, "apply_setting failed with rc=%d",
+			rc);
+	mutex_unlock(&fctrl->flash_wq_mutex);
 
-free_resource:
 	return rc;
 }
