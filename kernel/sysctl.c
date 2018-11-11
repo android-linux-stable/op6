@@ -1380,13 +1380,6 @@ static struct ctl_table vm_table[] = {
 		.extra2		= &two,
 	},
 	{
-		.procname	= "page_cache_reside_max",
-		.data		= &sysctl_page_cache_reside_max,
-		.maxlen		= sizeof(sysctl_page_cache_reside_max),
-		.mode		= 0666,
-		.proc_handler	= proc_dointvec_minmax,
-	},
-	{
 		.procname	= "oom_kill_allocating_task",
 		.data		= &sysctl_oom_kill_allocating_task,
 		.maxlen		= sizeof(sysctl_oom_kill_allocating_task),
