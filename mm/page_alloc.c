@@ -97,7 +97,6 @@ volatile unsigned long latent_entropy __latent_entropy;
 EXPORT_SYMBOL(latent_entropy);
 #endif
 
-unsigned long alloc_slow_nr;
 /*
  * Array of node states.
  */
@@ -270,8 +269,6 @@ int watermark_scale_factor;
  * down to the min watermarks controlled by min_free_kbytes above.
  */
 int extra_free_kbytes;
-
-atomic_t alloc_ongoing = ATOMIC_INIT(0);
 
 static unsigned long __meminitdata nr_kernel_pages;
 static unsigned long __meminitdata nr_all_pages;
@@ -3496,18 +3493,12 @@ static void wake_all_kswapds(unsigned int order, const struct alloc_context *ac)
 	struct zoneref *z;
 	struct zone *zone;
 	pg_data_t *last_pgdat = NULL;
-	struct task_struct* kswapd;
 
 	for_each_zone_zonelist_nodemask(zone, z, ac->zonelist,
 					ac->high_zoneidx, ac->nodemask) {
 		if (last_pgdat != zone->zone_pgdat)
 			wakeup_kswapd(zone, order, ac->high_zoneidx);
 		last_pgdat = zone->zone_pgdat;
-		kswapd = zone->zone_pgdat->kswapd;
-
-		/* early state check to prevent memory barrier and spinlock */
-		if (ac->lr_handle && kswapd->state == TASK_INTERRUPTIBLE)
-			wake_up_state(kswapd, TASK_INTERRUPTIBLE);
 	}
 }
 
@@ -3924,7 +3915,6 @@ __alloc_pages_nodemask(gfp_t gfp_mask, unsigned int order,
 		.zonelist = zonelist,
 		.nodemask = nodemask,
 		.migratetype = gfpflags_to_migratetype(gfp_mask),
-		.lr_handle = false,
 	};
 
 	if (cpusets_enabled()) {
@@ -3950,10 +3940,6 @@ __alloc_pages_nodemask(gfp_t gfp_mask, unsigned int order,
 	 */
 	if (unlikely(!zonelist->_zonerefs->zone))
 		return NULL;
-	if (current->signal->oom_score_adj <= vm_breath_priority) {
-		ac.lr_handle = true;
-		atomic_inc(&alloc_ongoing);
-	}
 
 	if (IS_ENABLED(CONFIG_CMA) && ac.migratetype == MIGRATE_MOVABLE)
 		alloc_flags |= ALLOC_CMA;
@@ -4011,8 +3997,6 @@ out:
 		kmemcheck_pagealloc_alloc(page, order, gfp_mask);
 
 	trace_mm_page_alloc(page, order, alloc_mask, ac.migratetype);
-	if (ac.lr_handle)
-		atomic_dec(&alloc_ongoing);
 
 	return page;
 }
@@ -4466,8 +4450,7 @@ void show_free_areas(unsigned int filter)
 		" unevictable:%lu dirty:%lu writeback:%lu unstable:%lu\n"
 		" slab_reclaimable:%lu slab_unreclaimable:%lu\n"
 		" mapped:%lu shmem:%lu pagetables:%lu bounce:%lu\n"
-		" free:%lu free_pcp:%lu free_cma:%lu\n"
-		" ramboost:%lu\n",
+		" free:%lu free_pcp:%lu free_cma:%lu\n",
 		global_node_page_state(NR_ACTIVE_ANON),
 		global_node_page_state(NR_INACTIVE_ANON),
 		global_node_page_state(NR_ISOLATED_ANON),
@@ -4486,8 +4469,7 @@ void show_free_areas(unsigned int filter)
 		global_page_state(NR_BOUNCE),
 		global_page_state(NR_FREE_PAGES),
 		free_pcp,
-		global_page_state(NR_FREE_CMA_PAGES),
-		global_page_state(NR_ZONE_UID_LRU));
+		global_page_state(NR_FREE_CMA_PAGES));
 
 	for_each_online_pgdat(pgdat) {
 		printk("Node %d"
@@ -4569,7 +4551,6 @@ void show_free_areas(unsigned int filter)
 			" free_pcp:%lukB"
 			" local_pcp:%ukB"
 			" free_cma:%lukB"
-			" ramboost:%lukB"
 			"\n",
 			zone->name,
 			K(zone_page_state(zone, NR_FREE_PAGES)),
@@ -4592,8 +4573,7 @@ void show_free_areas(unsigned int filter)
 			K(zone_page_state(zone, NR_BOUNCE)),
 			K(free_pcp),
 			K(this_cpu_read(zone->pageset->pcp.count)),
-			K(zone_page_state(zone, NR_FREE_CMA_PAGES)),
-			K(zone_page_state(zone, NR_ZONE_UID_LRU)));
+			K(zone_page_state(zone, NR_FREE_CMA_PAGES)));
 		printk("lowmem_reserve[]:");
 		for (i = 0; i < MAX_NR_ZONES; i++)
 			printk(KERN_CONT " %ld", zone->lowmem_reserve[i]);
