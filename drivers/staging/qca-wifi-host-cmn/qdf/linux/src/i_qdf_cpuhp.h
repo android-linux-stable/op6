@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012-2016 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2017-2018 The Linux Foundation. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -16,25 +16,19 @@
  * PERFORMANCE OF THIS SOFTWARE.
  */
 
-#ifndef QWLAN_VERSION_H
-#define QWLAN_VERSION_H
-/*===========================================================================
+/**
+ * DOC: i_qdf_cpuhp.h (CPU hotplug)
+ * Linux-specific definitions for QDF CPU hotplug API's
+ */
 
-   FILE:
-   qwlan_version.h
+#ifndef __I_QDF_CPUHP_H
+#define __I_QDF_CPUHP_H
 
-   BRIEF DESCRIPTION:
-   WLAN Host Version file.
-   Build number automaticly updated by build scripts.
+#include "linux/types.h"
 
-   ===========================================================================*/
+typedef void (*__qdf_cpuhp_emit)(uint32_t cpu);
 
-#define QWLAN_VERSION_MAJOR            5
-#define QWLAN_VERSION_MINOR            1
-#define QWLAN_VERSION_PATCH            1
-#define QWLAN_VERSION_EXTRA            "L"
-#define QWLAN_VERSION_BUILD            68
+void __qdf_cpuhp_os_init(__qdf_cpuhp_emit on_up, __qdf_cpuhp_emit on_down);
+void __qdf_cpuhp_os_deinit(void);
 
-#define QWLAN_VERSIONSTR               "5.1.1.68L"
-
-#endif /* QWLAN_VERSION_H */
+#endif /* __I_QDF_CPUHP_H */
