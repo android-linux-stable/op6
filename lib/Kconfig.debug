@@ -2080,13 +2080,11 @@ config PANIC_ON_DATA_CORRUPTION
 
 config CC_WERROR
 	bool "Treat all compile warnings as errors"
-	default n
+	default y
 	help
 	 Select this option to set compiler warnings as errors,
 	 to prevent easily-fixable problems from creeping into
 	 the codebase.
-
-	 If unsure, say N.
 
 source "samples/Kconfig"
 
