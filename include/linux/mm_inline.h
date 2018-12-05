@@ -21,26 +21,23 @@ static inline int page_is_file_cache(struct page *page)
 {
 	return !PageSwapBacked(page);
 }
+
 static __always_inline void __update_lru_size(struct lruvec *lruvec,
 				enum lru_list lru, enum zone_type zid,
-				int nr_pages, bool is_uidlru)
+				int nr_pages)
 {
 	struct pglist_data *pgdat = lruvec_pgdat(lruvec);
 
-	if (!is_uidlru) {
-		__mod_node_page_state(pgdat, NR_LRU_BASE + lru, nr_pages);
-		__mod_zone_page_state(&pgdat->node_zones[zid],
-					NR_ZONE_LRU_BASE + lru, nr_pages);
-	} else {
-		__mod_zone_page_state(&pgdat->node_zones[zid], NR_ZONE_UID_LRU, nr_pages);
-	}
+	__mod_node_page_state(pgdat, NR_LRU_BASE + lru, nr_pages);
+	__mod_zone_page_state(&pgdat->node_zones[zid],
+				NR_ZONE_LRU_BASE + lru, nr_pages);
 }
 
 static __always_inline void update_lru_size(struct lruvec *lruvec,
 				enum lru_list lru, enum zone_type zid,
-				int nr_pages, bool is_uidlru)
+				int nr_pages)
 {
-	__update_lru_size(lruvec, lru, zid, nr_pages, is_uidlru);
+	__update_lru_size(lruvec, lru, zid, nr_pages);
 #ifdef CONFIG_MEMCG
 	mem_cgroup_update_lru_size(lruvec, lru, zid, nr_pages);
 #endif
@@ -49,26 +46,23 @@ static __always_inline void update_lru_size(struct lruvec *lruvec,
 static __always_inline void add_page_to_lru_list(struct page *page,
 				struct lruvec *lruvec, enum lru_list lru)
 {
-	update_lru_size(lruvec, lru, page_zonenum(page), hpage_nr_pages(page), false);
+	update_lru_size(lruvec, lru, page_zonenum(page), hpage_nr_pages(page));
 	list_add(&page->lru, &lruvec->lists[lru]);
 }
 
 static __always_inline void add_page_to_lru_list_tail(struct page *page,
 				struct lruvec *lruvec, enum lru_list lru)
 {
-	update_lru_size(lruvec, lru, page_zonenum(page), hpage_nr_pages(page), false);
+	update_lru_size(lruvec, lru, page_zonenum(page), hpage_nr_pages(page));
 	list_add_tail(&page->lru, &lruvec->lists[lru]);
 }
 
 static __always_inline void del_page_from_lru_list(struct page *page,
-				struct lruvec *lruvec, enum lru_list lru, bool is_uidlru)
+				struct lruvec *lruvec, enum lru_list lru)
 {
 	list_del(&page->lru);
-	if (is_uidlru)
-		ClearPageUIDLRU(page);
-	update_lru_size(lruvec, lru, page_zonenum(page), -hpage_nr_pages(page), is_uidlru);
+	update_lru_size(lruvec, lru, page_zonenum(page), -hpage_nr_pages(page));
 }
-
 
 /**
  * page_lru_base_type - which LRU list type should a page be on?

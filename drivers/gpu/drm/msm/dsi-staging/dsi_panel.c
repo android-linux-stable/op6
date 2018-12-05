@@ -3948,7 +3948,6 @@ int dsi_panel_enable(struct dsi_panel *panel)
 	}
 
 	pr_err("end\n");
-	pm_print_active_wakeup_sources_queue(false);
 	return rc;
 }
 
@@ -4047,7 +4046,6 @@ error:
 	mutex_unlock(&panel->panel_lock);
 	pr_err("end\n");
 	/* add print actvie ws */
-	pm_print_active_wakeup_sources_queue(true);
 	return rc;
 }
 
@@ -4354,12 +4352,11 @@ int dsi_panel_set_dci_p3_mode(struct dsi_panel *panel, int level)
 	mutex_lock(&panel->panel_lock);
     if (level) {
         count = mode->priv_info->cmd_sets[DSI_CMD_SET_DCI_P3_ON].count;
-
-
+			printk(KERN_ERR"Real Send DCI-P3 on command\n");
             rc = dsi_panel_tx_cmd_set(panel, DSI_CMD_SET_DCI_P3_ON);
             pr_err("DCI-P3 Mode On.\n");
     } else {   
-
+			printk(KERN_ERR"Real Send DCI-P3 off command\n");
             rc = dsi_panel_tx_cmd_set(panel, DSI_CMD_SET_DCI_P3_OFF);
             pr_err("DCI-P3 Mode Off.\n");
     }
@@ -4381,12 +4378,12 @@ int dsi_panel_set_night_mode(struct dsi_panel *panel, int level)
 	mutex_lock(&panel->panel_lock);
     if (level) {
         count = mode->priv_info->cmd_sets[DSI_CMD_SET_NIGHT_ON].count;
-
+			printk(KERN_ERR"Real Send Night mode on command\n");
             rc = dsi_panel_tx_cmd_set(panel, DSI_CMD_SET_NIGHT_ON);
             pr_err("night Mode On.\n");
     } else {
         count = mode->priv_info->cmd_sets[DSI_CMD_SET_NIGHT_OFF].count;
-
+			printk(KERN_ERR"Real Send Night mode off command\n");
             rc = dsi_panel_tx_cmd_set(panel, DSI_CMD_SET_NIGHT_OFF);
             pr_err("night Mode Off.\n");
     }
@@ -4515,6 +4512,7 @@ int dsi_panel_set_aod_mode(struct dsi_panel *panel, int level)
 		        dsi_panel_set_night_mode(panel, panel->night_mode);
 		    if (panel->adaption_mode)
 		        dsi_panel_set_adaption_mode(panel, panel->adaption_mode);
+			   rc= dsi_panel_update_backlight(panel,panel->bl_config.bl_level);
                                 }
               printk(KERN_ERR"send AOD OFF commd end \n");
                 
