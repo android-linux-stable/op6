@@ -21,7 +21,6 @@
 #include <linux/pinctrl/pinctrl.h>
 #include <linux/pinctrl/machine.h>
 
-
 static struct component_info component_info_desc[COMPONENT_MAX];
 static struct kobject *project_info_kobj;
 static struct project_info *project_info_desc;
@@ -52,9 +51,15 @@ static DEVICE_ATTR(serialno, 0444, project_info_get, NULL);
 static DEVICE_ATTR(feature_id, 0444, project_info_get, NULL);
 static DEVICE_ATTR(aboard_id, 0444, project_info_get, NULL);
 
-void save_dump_reason_to_smem(char *info)
+void save_dump_reason_to_smem(char *info, char *function_name)
 {
-    int strl = 0 ;
+    int strl = 0, strl1 = 0;
+    static int flag = 0;
+
+    /* Make sure save_dump_reason_to_smem() is not called
+     infinite times by panic()  during DDR bit flip crash etc */
+    if (flag > 1)
+	return;
 
     dp_info = smem_alloc(SMEM_DUMP_INFO,
         sizeof(struct dump_info), 0,
@@ -66,10 +71,20 @@ void save_dump_reason_to_smem(char *info)
         pr_err("%s: info : %s\n",__func__, info);
 
         strl = strlen(info)+1;
-        strl = strl <  DUMP_REASON_SIZE ? strl: DUMP_REASON_SIZE ;
-        memcpy(dp_info->dump_reason,info,strl);
-        pr_err("%s: dump_reason : %s strl=%d \n",__func__, dp_info->dump_reason,strl);
+        strl1 = strlen(function_name)+1;
+        strl = strl <  DUMP_REASON_SIZE ? strl: DUMP_REASON_SIZE;
+        strl1 = strl1 <  DUMP_REASON_SIZE ? strl1: DUMP_REASON_SIZE ;
+        if ((strlen(dp_info->dump_reason) + strl) < DUMP_REASON_SIZE)
+                strncat(dp_info->dump_reason,info,strl);
+
+        if (function_name != NULL && ((strlen(dp_info->dump_reason) + strl1) < DUMP_REASON_SIZE)) {
+                strncat(dp_info->dump_reason,function_name,strl1);
+                strncat(dp_info->dump_reason,"\n",1);
+	}
     }
+    pr_err("\r%s: dump_reason : %s strl=%d function caused panic :%s strl1=%d \n", __func__,
+                           dp_info->dump_reason, strl, function_name, strl1);
+    flag++;
 }
 
 uint8 get_secureboot_fuse_status(void)
@@ -531,7 +546,6 @@ uint32 get_hw_version(void)
     }
     return 0;
 }
-
 
 int __init init_project_info(void)
 {
