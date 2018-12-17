@@ -219,6 +219,8 @@
 #define QPNP_BTM_Mn_DATA1(n)			((n * 2) + 0xa1)
 #define QPNP_BTM_CHANNELS			8
 
+#define QPNP_ADC_WAKEUP_SRC_TIMEOUT_MS          2000
+
 /* QPNP ADC TM HC end */
 
 struct qpnp_adc_thr_info {
@@ -273,7 +275,6 @@ struct qpnp_adc_tm_chip {
 	bool				adc_tm_initialized;
 	bool				adc_tm_recalib_check;
 	int				max_channels_available;
-	atomic_t			wq_cnt;
 	struct qpnp_vadc_chip		*vadc_dev;
 	struct workqueue_struct		*high_thr_wq;
 	struct workqueue_struct		*low_thr_wq;
@@ -361,6 +362,7 @@ static struct qpnp_adc_tm_reverse_scale_fn adc_tm_rscale_fn[] = {
 	[SCALE_R_ABSOLUTE] = {qpnp_adc_absolute_rthr},
 	[SCALE_QRD_SKUH_RBATT_THERM] = {qpnp_adc_qrd_skuh_btm_scaler},
 	[SCALE_QRD_SKUT1_RBATT_THERM] = {qpnp_adc_qrd_skut1_btm_scaler},
+	[SCALE_QRD_215_RBATT_THERM] = {qpnp_adc_qrd_215_btm_scaler},
 };
 
 static int32_t qpnp_adc_tm_read_reg(struct qpnp_adc_tm_chip *chip,
@@ -2712,12 +2714,14 @@ static irqreturn_t qpnp_adc_tm_rc_thr_isr(int irq, void *data)
 	}
 
 	if (sensor_low_notify_num) {
-		pm_wakeup_event(chip->dev, 2000);
+		pm_wakeup_event(chip->dev,
+				QPNP_ADC_WAKEUP_SRC_TIMEOUT_MS);
 		queue_work(chip->low_thr_wq, &chip->trigger_low_thr_work);
 	}
 
 	if (sensor_high_notify_num) {
-		pm_wakeup_event(chip->dev, 2000);
+		pm_wakeup_event(chip->dev,
+				QPNP_ADC_WAKEUP_SRC_TIMEOUT_MS);
 		queue_work(chip->high_thr_wq,
 				&chip->trigger_high_thr_work);
 	}

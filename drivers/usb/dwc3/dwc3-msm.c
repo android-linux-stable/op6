@@ -3792,6 +3792,7 @@ static int dwc3_msm_remove(struct platform_device *pdev)
 	platform_device_put(mdwc->dwc3);
 	device_for_each_child(&pdev->dev,
 		NULL, dwc3_msm_remove_children);
+	of_platform_depopulate(&pdev->dev);
 
 	pm_runtime_disable(mdwc->dev);
 	pm_runtime_barrier(mdwc->dev);
