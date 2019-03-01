@@ -1142,6 +1142,7 @@ int dsi_display_set_power(struct drm_connector *connector,
 		notifier_data.id = connector_state_crtc_index;
 		msm_drm_notifier_call_chain(MSM_DRM_EARLY_EVENT_BLANK,
 					    &notifier_data);
+                rc = dsi_panel_enable(display->panel);
 	} else if (power_mode == SDE_MODE_DPMS_LP1) {
 		blank = MSM_DRM_BLANK_NORMAL;
 		notifier_data.data = &blank;
