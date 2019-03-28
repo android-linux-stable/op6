@@ -947,6 +947,7 @@ static irqreturn_t wcd_mbhc_adc_hs_rem_irq(int irq, void *data)
 
 	timeout = jiffies +
 		  msecs_to_jiffies(WCD_FAKE_REMOVAL_MIN_PERIOD_MS);
+
 /* liuhaituo@MM.Audio 2018/6/8 modify adc_threshold is consistent with OMR1 */
 	adc_threshold = ((WCD_MBHC_ADC_HS_THRESHOLD_MV *
 				wcd_mbhc_get_micbias(mbhc)) /
@@ -959,6 +960,7 @@ static irqreturn_t wcd_mbhc_adc_hs_rem_irq(int irq, void *data)
 		 * any change in IN2_P
 		 */
 		usleep_range(10000, 10100);
+		adc_threshold = wcd_mbhc_adc_get_hs_thres(mbhc);
 		output_mv = wcd_measure_adc_once(mbhc, MUX_CTL_IN2P);
 
 		pr_debug("%s: Check for fake removal: output_mv %d\n",

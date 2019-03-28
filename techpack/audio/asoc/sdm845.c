@@ -4062,6 +4062,7 @@ static void *def_tavil_mbhc_cal(void)
 	btn_high[5] = 600;
 	btn_high[6] = 600;
 	btn_high[7] = 600;
+	
 
 	return tavil_wcd_cal;
 }
@@ -7564,6 +7565,7 @@ static struct platform_driver sdm845_asoc_machine_driver = {
 		.owner = THIS_MODULE,
 		.pm = &snd_soc_pm_ops,
 		.of_match_table = sdm845_asoc_machine_of_match,
+		.suppress_bind_attrs = true,
 	},
 	.probe = msm_asoc_machine_probe,
 	.remove = msm_asoc_machine_remove,
