@@ -3907,6 +3907,9 @@ int dsi_panel_enable(struct dsi_panel *panel)
 	mutex_lock(&panel->panel_lock);
 	printk(KERN_ERR"Send DSI_CMD_SET_ON\n");
 	rc = dsi_panel_tx_cmd_set(panel, DSI_CMD_SET_ON);
+	if(panel->aod_mode!=2){
+		rc = dsi_panel_tx_cmd_set(panel, DSI_CMD_SET_POST_ON);
+		}
 	if (rc) {
 		pr_err("[%s] failed to send DSI_CMD_SET_ON cmds, rc=%d\n",
 		       panel->name, rc);
@@ -3954,6 +3957,7 @@ int dsi_panel_enable(struct dsi_panel *panel)
 int dsi_panel_post_enable(struct dsi_panel *panel)
 {
 	int rc = 0;
+	return 0;
 
 	if (!panel) {
 		pr_err("invalid params\n");
@@ -4501,12 +4505,14 @@ int dsi_panel_set_aod_mode(struct dsi_panel *panel, int level)
 				printk(KERN_ERR"send AOD OFF commd start \n");
 				if(aod_real_flag==true){
 				printk(KERN_ERR"send DSI_CMD_SET_AOD_OFF \n");
-                rc = dsi_panel_tx_cmd_set(panel, DSI_CMD_SET_AOD_OFF);
+				rc = dsi_panel_tx_cmd_set(panel, DSI_CMD_SET_AOD_OFF);
 				}
 				if(aod_real_flag==false){
 				printk(KERN_ERR"send DSI_CMD_SET_AOD_OFF_NEW \n");
 				rc = dsi_panel_tx_cmd_set(panel, DSI_CMD_SET_AOD_OFF_NEW);
-			if (panel->srgb_mode)
+				rc= dsi_panel_update_backlight(panel,panel->bl_config.bl_level);
+				}
+		    if (panel->srgb_mode)
 		        dsi_panel_set_srgb_mode(panel, panel->srgb_mode);
 		    if (panel->dci_p3_mode)
 		        dsi_panel_set_dci_p3_mode(panel, panel->dci_p3_mode);
@@ -4514,12 +4520,11 @@ int dsi_panel_set_aod_mode(struct dsi_panel *panel, int level)
 		        dsi_panel_set_night_mode(panel, panel->night_mode);
 		    if (panel->adaption_mode)
 		        dsi_panel_set_adaption_mode(panel, panel->adaption_mode);
-			   rc= dsi_panel_update_backlight(panel,panel->bl_config.bl_level);
-				}
               printk(KERN_ERR"send AOD OFF commd end \n");
               aod_complete = false;
             }
         }
+
     panel->aod_curr_mode = level;
     pr_err("AOD MODE = %d\n", level);
 return rc;
