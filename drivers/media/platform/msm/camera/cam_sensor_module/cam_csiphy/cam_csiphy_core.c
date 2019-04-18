@@ -1,4 +1,4 @@
-/* Copyright (c) 2017-2018, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2017-2019, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -27,14 +27,25 @@ module_param(csiphy_dump, int, 0644);
 static int cam_csiphy_notify_secure_mode(int phy, bool protect)
 {
 	struct scm_desc desc = {0};
+	int result = -1;
 
 	desc.arginfo = SCM_ARGS(2, SCM_VAL, SCM_VAL);
 	desc.args[0] = protect;
 	desc.args[1] = phy;
 
-	CAM_DBG(CAM_CSIPHY, "phy : %d, protect : %d", phy, protect);
-	if (scm_call2(SCM_SIP_FNID(SCM_SVC_CAMERASS, SECURE_SYSCALL_ID),
-		&desc)) {
+	/*
+	 * If SECURE_SYSCALL_ID_2 is not supported
+	 * then fallback to SECURE_SYSCALL_ID
+	 */
+	result = scm_call2(SCM_SIP_FNID(SCM_SVC_CAMERASS, SECURE_SYSCALL_ID_2),
+		&desc);
+	if (result == -EOPNOTSUPP) {
+		desc.args[1] = csiphy_dev->soc_info.index;
+		CAM_ERR(CAM_CSIPHY, "SCM CALL 7 not supported fallback to 6");
+		result = scm_call2(SCM_SIP_FNID(SCM_SVC_CAMERASS,
+						SECURE_SYSCALL_ID), &desc);
+	}
+	if (result) {
 		CAM_ERR(CAM_CSIPHY, "scm call to hypervisor failed");
 		return -EINVAL;
 	}
