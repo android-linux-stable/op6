@@ -1,4 +1,4 @@
-/* Copyright (c) 2017-2018, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2017-2019, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -34,7 +34,7 @@ static void cam_node_print_ctx_state(
 		spin_lock(&ctx->lock);
 		CAM_INFO(CAM_CORE,
 			"[%s][%d] : state=%d, refcount=%d, active_req_list=%d, pending_req_list=%d, wait_req_list=%d, free_req_list=%d",
-			ctx->dev_name ? ctx->dev_name : "null",
+			ctx->dev_name,
 			i, ctx->state,
 			atomic_read(&(ctx->refcount.refcount)),
 			list_empty(&ctx->active_req_list),
@@ -154,6 +154,12 @@ static int __cam_node_handle_start_dev(struct cam_node *node,
 		return -EINVAL;
 	}
 
+	if (strcmp(node->name, ctx->dev_name)) {
+		CAM_ERR(CAM_CORE, "node name %s dev name:%s not matching",
+			node->name, ctx->dev_name);
+		return -EINVAL;
+	}
+
 	rc = cam_context_handle_start_dev(ctx, start);
 	if (rc)
 		CAM_ERR(CAM_CORE, "Start failure for node %s", node->name);
@@ -184,6 +190,12 @@ static int __cam_node_handle_stop_dev(struct cam_node *node,
 	if (!ctx) {
 		CAM_ERR(CAM_CORE, "Can not get context for handle %d",
 			stop->dev_handle);
+		return -EINVAL;
+	}
+
+	if (strcmp(node->name, ctx->dev_name)) {
+		CAM_ERR(CAM_CORE, "node name %s dev name:%s not matching",
+			node->name, ctx->dev_name);
 		return -EINVAL;
 	}
 
@@ -220,6 +232,12 @@ static int __cam_node_handle_config_dev(struct cam_node *node,
 		return -EINVAL;
 	}
 
+	if (strcmp(node->name, ctx->dev_name)) {
+		CAM_ERR(CAM_CORE, "node name %s dev name:%s not matching",
+			node->name, ctx->dev_name);
+		return -EINVAL;
+	}
+
 	rc = cam_context_handle_config_dev(ctx, config);
 	if (rc)
 		CAM_ERR(CAM_CORE, "Config failure for node %s", node->name);
@@ -253,6 +271,12 @@ static int __cam_node_handle_flush_dev(struct cam_node *node,
 		return -EINVAL;
 	}
 
+	if (strcmp(node->name, ctx->dev_name)) {
+		CAM_ERR(CAM_CORE, "node name %s dev name:%s not matching",
+			node->name, ctx->dev_name);
+		return -EINVAL;
+	}
+
 	rc = cam_context_handle_flush_dev(ctx, flush);
 	if (rc)
 		CAM_ERR(CAM_CORE, "Flush failure for node %s", node->name);
@@ -283,6 +307,12 @@ static int __cam_node_handle_release_dev(struct cam_node *node,
 	if (!ctx) {
 		CAM_ERR(CAM_CORE, "Can not get context for handle %d node %s",
 			release->dev_handle, node->name);
+		return -EINVAL;
+	}
+
+	if (strcmp(node->name, ctx->dev_name)) {
+		CAM_ERR(CAM_CORE, "node name %s dev name:%s not matching",
+			node->name, ctx->dev_name);
 		return -EINVAL;
 	}
 
@@ -504,7 +534,7 @@ int cam_node_handle_ioctl(struct cam_node *node, struct cam_control *cmd)
 	case CAM_QUERY_CAP: {
 		struct cam_query_cap_cmd query;
 
-		if (copy_from_user(&query, (void __user *)cmd->handle,
+		if (copy_from_user(&query, u64_to_user_ptr(cmd->handle),
 			sizeof(query))) {
 			rc = -EFAULT;
 			break;
@@ -517,7 +547,7 @@ int cam_node_handle_ioctl(struct cam_node *node, struct cam_control *cmd)
 			break;
 		}
 
-		if (copy_to_user((void __user *)cmd->handle, &query,
+		if (copy_to_user(u64_to_user_ptr(cmd->handle), &query,
 			sizeof(query)))
 			rc = -EFAULT;
 
@@ -526,7 +556,7 @@ int cam_node_handle_ioctl(struct cam_node *node, struct cam_control *cmd)
 	case CAM_ACQUIRE_DEV: {
 		struct cam_acquire_dev_cmd acquire;
 
-		if (copy_from_user(&acquire, (void __user *)cmd->handle,
+		if (copy_from_user(&acquire, u64_to_user_ptr(cmd->handle),
 			sizeof(acquire))) {
 			rc = -EFAULT;
 			break;
@@ -537,7 +567,7 @@ int cam_node_handle_ioctl(struct cam_node *node, struct cam_control *cmd)
 				rc);
 			break;
 		}
-		if (copy_to_user((void __user *)cmd->handle, &acquire,
+		if (copy_to_user(u64_to_user_ptr(cmd->handle), &acquire,
 			sizeof(acquire)))
 			rc = -EFAULT;
 		break;
@@ -545,7 +575,7 @@ int cam_node_handle_ioctl(struct cam_node *node, struct cam_control *cmd)
 	case CAM_START_DEV: {
 		struct cam_start_stop_dev_cmd start;
 
-		if (copy_from_user(&start, (void __user *)cmd->handle,
+		if (copy_from_user(&start, u64_to_user_ptr(cmd->handle),
 			sizeof(start)))
 			rc = -EFAULT;
 		else {
@@ -559,7 +589,7 @@ int cam_node_handle_ioctl(struct cam_node *node, struct cam_control *cmd)
 	case CAM_STOP_DEV: {
 		struct cam_start_stop_dev_cmd stop;
 
-		if (copy_from_user(&stop, (void __user *)cmd->handle,
+		if (copy_from_user(&stop, u64_to_user_ptr(cmd->handle),
 			sizeof(stop)))
 			rc = -EFAULT;
 		else {
@@ -573,7 +603,7 @@ int cam_node_handle_ioctl(struct cam_node *node, struct cam_control *cmd)
 	case CAM_CONFIG_DEV: {
 		struct cam_config_dev_cmd config;
 
-		if (copy_from_user(&config, (void __user *)cmd->handle,
+		if (copy_from_user(&config, u64_to_user_ptr(cmd->handle),
 			sizeof(config)))
 			rc = -EFAULT;
 		else {
@@ -587,7 +617,7 @@ int cam_node_handle_ioctl(struct cam_node *node, struct cam_control *cmd)
 	case CAM_RELEASE_DEV: {
 		struct cam_release_dev_cmd release;
 
-		if (copy_from_user(&release, (void __user *)cmd->handle,
+		if (copy_from_user(&release, u64_to_user_ptr(cmd->handle),
 			sizeof(release)))
 			rc = -EFAULT;
 		else {
@@ -601,7 +631,7 @@ int cam_node_handle_ioctl(struct cam_node *node, struct cam_control *cmd)
 	case CAM_FLUSH_REQ: {
 		struct cam_flush_dev_cmd flush;
 
-		if (copy_from_user(&flush, (void __user *)cmd->handle,
+		if (copy_from_user(&flush, u64_to_user_ptr(cmd->handle),
 			sizeof(flush)))
 			rc = -EFAULT;
 		else {

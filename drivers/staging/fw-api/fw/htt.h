@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011-2018 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2011-2019 The Linux Foundation. All rights reserved.
  *
  * Previously licensed under the ISC license by Qualcomm Atheros, Inc.
  *
@@ -171,9 +171,15 @@
  * 3.54 Define mcast and mcast_valid flags within htt_tx_wbm_transmit_status
  * 3.55 Add initiator / responder flags to RX_DELBA indication
  * 3.56 Fix HTT_RX_RING_SELECTION_CFG_PKT_TYPE_ENABLE bit-mask defs
+ * 3.57 Add support for in-band data within HTT_T2H_MSG_TYPE_CFR_DUMP_COMPL_IND
+ * 3.58 Add optional MSDU ack RSSI array to end of HTT_T2H TX_COMPL_IND msg
+ * 3.59 Add HTT_RXDMA_HOST_BUF_RING2 def
+ * 3.60 Add HTT_T2H_MSG_TYPE_PEER_STATS_IND def
+ * 3.61 Add rx offset fields to HTT_H2T_MSG_TYPE_RX_RING_SELECTION_CFG msg
+ * 3.62 Add antenna mask to reserved space in htt_rx_ind_hl_rx_desc_t
  */
 #define HTT_CURRENT_VERSION_MAJOR 3
-#define HTT_CURRENT_VERSION_MINOR 56
+#define HTT_CURRENT_VERSION_MINOR 62
 
 #define HTT_NUM_TX_FRAG_DESC  1024
 
@@ -4387,6 +4393,7 @@ enum htt_srng_ring_id {
     HTT_HOST1_TO_FW_RXBUF_RING,    /* (mobile only) used by host to provide remote RX buffers */
     HTT_HOST2_TO_FW_RXBUF_RING,    /* (mobile only) second ring used by host to provide remote RX buffers */
     HTT_RXDMA_NON_MONITOR_DEST_RING, /* Per MDPU indication to host for non-monitor RxDMA traffic upload */
+    HTT_RXDMA_HOST_BUF_RING2,      /* Second ring used by FW to feed removed buffers and update removed packets */
     /* Add Other SRING which can't be directly configured by host software above this line */
 };
 
@@ -4723,9 +4730,9 @@ enum htt_srng_ring_id {
  *
  *    The message would appear as follows:
  *
- *    |31       26|25|24|23            16|15             8|7             0|
+ *    |31    27|26|25|24|23            16|15             8|7             0|
  *    |-----------------+----------------+----------------+---------------|
- *    |   rsvd1   |PS|SS|     ring_id    |     pdev_id    |    msg_type   |
+ *    |  rsvd1 |OV|PS|SS|     ring_id    |     pdev_id    |    msg_type   |
  *    |-------------------------------------------------------------------|
  *    |              rsvd2               |           ring_buffer_size     |
  *    |-------------------------------------------------------------------|
@@ -4739,9 +4746,18 @@ enum htt_srng_ring_id {
  *    |-------------------------------------------------------------------|
  *    |                         tlv_filter_in_flags                       |
  *    |-------------------------------------------------------------------|
+ *    |         rx_header_offset         |       rx_packet_offset         |
+ *    |-------------------------------------------------------------------|
+ *    |       rx_mpdu_start_offset       |      rx_mpdu_end_offset        |
+ *    |-------------------------------------------------------------------|
+ *    |       rx_msdu_start_offset       |      rx_msdu_end_offset        |
+ *    |-------------------------------------------------------------------|
+ *    |              rsvd3               |      rx_attention_offset       |
+ *    |-------------------------------------------------------------------|
  * Where:
  *     PS = pkt_swap
  *     SS = status_swap
+ *     OV = rx_offsets_valid
  * The message is interpreted as follows:
  * dword0 - b'0:7   - msg_type: This will be set to
  *                    HTT_H2T_MSG_TYPE_RX_RING_SELECTION_CFG
@@ -4750,9 +4766,15 @@ enum htt_srng_ring_id {
  *                    1/2/3 mac id (for rings at LMAC level)
  *          b'16:23 - ring_id : Identify the ring to configure.
  *                    More details can be got from enum htt_srng_ring_id
- *          b'24    - status_swap: 1 is to swap status TLV
- *          b'25    - pkt_swap:  1 is to swap packet TLV
- *          b'26:31 - rsvd1:  reserved for future use
+ *          b'24    - status_swap (SS): 1 is to swap status TLV - refer to
+ *                    BUF_RING_CFG_0 defs within HW .h files,
+ *                    e.g. wmac_top_reg_seq_hwioreg.h
+ *          b'25    - pkt_swap (PS):  1 is to swap packet TLV - refer to
+ *                    BUF_RING_CFG_0 defs within HW .h files,
+ *                    e.g. wmac_top_reg_seq_hwioreg.h
+ *          b'26    - rx_offset_valid (OV): flag to indicate rx offsets
+ *                    configuration fields are valid
+ *          b'27:31 - rsvd1:  reserved for future use
  * dword1 - b'0:16  - ring_buffer_size: size of bufferes referenced by rx ring,
  *                    in byte units.
  *                    Valid only for HW_TO_SW_RING and SW_TO_HW_RING
@@ -4781,14 +4803,51 @@ enum htt_srng_ring_id {
  * dword6 - b'0:31 -  tlv_filter_in_flags:
  *                    Filter in Attention/MPDU/PPDU/Header/User tlvs
  *                    Refer to CFG_TLV_FILTER_IN_FLAG defs
+ * dword7 - b'0:15 -  rx_packet_offset: rx_packet_offset in byte units
+ *                    Valid only for HW_TO_SW_RING and SW_TO_HW_RING
+ *                    A value of 0 will be considered as ignore this config.
+ *                    Refer to BUF_RING_CFG_1 defs within HW .h files,
+ *                    e.g. wmac_top_reg_seq_hwioreg.h
+ *        - b'16:31 - rx_header_offset: rx_header_offset in byte units
+ *                    Valid only for HW_TO_SW_RING and SW_TO_HW_RING
+ *                    A value of 0 will be considered as ignore this config.
+ *                    Refer to BUF_RING_CFG_1 defs within HW .h files,
+ *                    e.g. wmac_top_reg_seq_hwioreg.h
+ * dword8 - b'0:15 -  rx_mpdu_end_offset: rx_mpdu_end_offset in byte units
+ *                    Valid only for HW_TO_SW_RING and SW_TO_HW_RING
+ *                    A value of 0 will be considered as ignore this config.
+ *                    Refer to BUF_RING_CFG_2 defs within HW .h files,
+ *                    e.g. wmac_top_reg_seq_hwioreg.h
+ *        - b'16:31 - rx_mpdu_start_offset: rx_mpdu_start_offset in byte units
+ *                    Valid only for HW_TO_SW_RING and SW_TO_HW_RING
+ *                    A value of 0 will be considered as ignore this config.
+ *                    Refer to BUF_RING_CFG_2 defs within HW .h files,
+ *                    e.g. wmac_top_reg_seq_hwioreg.h
+ * dword9 - b'0:15 -  rx_msdu_end_offset: rx_msdu_end_offset in byte units
+ *                    Valid only for HW_TO_SW_RING and SW_TO_HW_RING
+ *                    A value of 0 will be considered as ignore this config.
+ *                    Refer to BUF_RING_CFG_3 defs within HW .h files,
+ *                    e.g. wmac_top_reg_seq_hwioreg.h
+ *        - b'16:31 - rx_msdu_start_offset: rx_msdu_start_offset in byte units
+ *                    Valid only for HW_TO_SW_RING and SW_TO_HW_RING
+ *                    A value of 0 will be considered as ignore this config.
+ *                    Refer to BUF_RING_CFG_3 defs within HW .h files,
+ *                    e.g. wmac_top_reg_seq_hwioreg.h
+ * dword10 - b'0:15 - rx_attention_offset: rx_attention_offset in byte units
+ *                    Valid only for HW_TO_SW_RING and SW_TO_HW_RING
+ *                    A value of 0 will be considered as ignore this config.
+ *                    Refer to BUF_RING_CFG_4 defs within HW .h files,
+ *                    e.g. wmac_top_reg_seq_hwioreg.h
+ *        - b'16-31 - rsvd3 for future use
  */
 PREPACK struct htt_rx_ring_selection_cfg_t {
-    A_UINT32 msg_type:    8,
-             pdev_id:     8,
-             ring_id:     8,
-             status_swap: 1,
-             pkt_swap:    1,
-             rsvd1:       6;
+    A_UINT32 msg_type:          8,
+             pdev_id:           8,
+             ring_id:           8,
+             status_swap:       1,
+             pkt_swap:          1,
+             rx_offsets_valid:  1,
+             rsvd1:             5;
     A_UINT32 ring_buffer_size: 16,
              rsvd2:            16;
     A_UINT32 packet_type_enable_flags_0;
@@ -4796,6 +4855,14 @@ PREPACK struct htt_rx_ring_selection_cfg_t {
     A_UINT32 packet_type_enable_flags_2;
     A_UINT32 packet_type_enable_flags_3;
     A_UINT32 tlv_filter_in_flags;
+    A_UINT32 rx_packet_offset:     16,
+             rx_header_offset:     16;
+    A_UINT32 rx_mpdu_end_offset:   16,
+             rx_mpdu_start_offset: 16;
+    A_UINT32 rx_msdu_end_offset:   16,
+             rx_msdu_start_offset: 16;
+    A_UINT32 rx_attn_offset:       16,
+             rsvd3:                16;
 } POSTPACK;
 
 #define HTT_RX_RING_SELECTION_CFG_SZ    (sizeof(struct htt_rx_ring_selection_cfg_t))
@@ -4842,6 +4909,17 @@ PREPACK struct htt_rx_ring_selection_cfg_t {
             do { \
                 HTT_CHECK_SET_VAL(HTT_RX_RING_SELECTION_CFG_PKT_TLV_SWAP, _val); \
                 ((_var) |= ((_val) << HTT_RX_RING_SELECTION_CFG_PKT_TLV_SWAP_S)); \
+            } while (0)
+
+#define HTT_RX_RING_SELECTION_CFG_RX_OFFSETS_VALID_M           0x04000000
+#define HTT_RX_RING_SELECTION_CFG_RX_OFFSETS_VALID_S           26
+#define HTT_RX_RING_SELECTION_CFG_RX_OFFSETS_VALID_GET(_var) \
+            (((_var) & HTT_RX_RING_SELECTION_CFG_RX_OFFSETS_VALID_M) >> \
+                    HTT_RX_RING_SELECTION_CFG_RX_OFFSETS_VALID_S)
+#define HTT_RX_RING_SELECTION_CFG_RX_OFFSETS_VALID_SET(_var, _val) \
+            do { \
+                HTT_CHECK_SET_VAL(HTT_RX_RING_SELECTION_CFG_RX_OFFSETS_VALID, _val); \
+                ((_var) |= ((_val) << HTT_RX_RING_SELECTION_CFG_RX_OFFSETS_VALID_S)); \
             } while (0)
 
 #define HTT_RX_RING_SELECTION_CFG_RING_BUFFER_SIZE_M           0x0000ffff
@@ -4908,6 +4986,83 @@ PREPACK struct htt_rx_ring_selection_cfg_t {
             do { \
                 HTT_CHECK_SET_VAL(HTT_RX_RING_SELECTION_CFG_TLV_FILTER_IN_FLAG, _val); \
                 ((_var) |= ((_val) << HTT_RX_RING_SELECTION_CFG_TLV_FILTER_IN_FLAG_S)); \
+            } while (0)
+
+#define HTT_RX_RING_SELECTION_CFG_RX_PACKET_OFFSET_M         0x0000ffff
+#define HTT_RX_RING_SELECTION_CFG_RX_PACKET_OFFSET_S         0
+#define HTT_RX_RING_SELECTION_CFG_RX_PACKET_OFFSET_GET(_var) \
+            (((_var) & HTT_RX_RING_SELECTION_CFG_RX_PACKET_OFFSET_M) >> \
+                    HTT_RX_RING_SELECTION_CFG_RX_PACKET_OFFSET_S)
+#define HTT_RX_RING_SELECTION_CFG_RX_PACKET_OFFSET_SET(_var, _val) \
+            do { \
+                HTT_CHECK_SET_VAL(HTT_RX_RING_SELECTION_CFG_RX_PACKET_OFFSET, _val); \
+                ((_var) |= ((_val) << HTT_RX_RING_SELECTION_CFG_RX_PACKET_OFFSET_S)); \
+            } while (0)
+
+#define HTT_RX_RING_SELECTION_CFG_RX_HEADER_OFFSET_M         0xffff0000
+#define HTT_RX_RING_SELECTION_CFG_RX_HEADER_OFFSET_S         16
+#define HTT_RX_RING_SELECTION_CFG_RX_HEADER_OFFSET_GET(_var) \
+            (((_var) & HTT_RX_RING_SELECTION_CFG_RX_HEADER_OFFSET_M) >> \
+                    HTT_RX_RING_SELECTION_CFG_RX_HEADER_OFFSET_S)
+#define HTT_RX_RING_SELECTION_CFG_RX_HEADER_OFFSET_SET(_var, _val) \
+            do { \
+                HTT_CHECK_SET_VAL(HTT_RX_RING_SELECTION_CFG_RX_HEADER_OFFSET, _val); \
+                ((_var) |= ((_val) << HTT_RX_RING_SELECTION_CFG_RX_HEADER_OFFSET_S)); \
+            } while (0)
+
+#define HTT_RX_RING_SELECTION_CFG_RX_MPDU_END_OFFSET_M         0x0000ffff
+#define HTT_RX_RING_SELECTION_CFG_RX_MPDU_END_OFFSET_S         0
+#define HTT_RX_RING_SELECTION_CFG_RX_MPDU_END_OFFSET_GET(_var) \
+            (((_var) & HTT_RX_RING_SELECTION_CFG_RX_MPDU_END_OFFSET_M) >> \
+                    HTT_RX_RING_SELECTION_CFG_RX_MPDU_END_OFFSET_S)
+#define HTT_RX_RING_SELECTION_CFG_RX_MPDU_END_OFFSET_SET(_var, _val) \
+            do { \
+                HTT_CHECK_SET_VAL(HTT_RX_RING_SELECTION_CFG_RX_MPDU_END_OFFSET, _val); \
+                ((_var) |= ((_val) << HTT_RX_RING_SELECTION_CFG_RX_MPDU_END_OFFSET_S)); \
+            } while (0)
+
+#define HTT_RX_RING_SELECTION_CFG_RX_MPDU_START_OFFSET_M         0xffff0000
+#define HTT_RX_RING_SELECTION_CFG_RX_MPDU_START_OFFSET_S         16
+#define HTT_RX_RING_SELECTION_CFG_RX_MPDU_START_OFFSET_GET(_var) \
+            (((_var) & HTT_RX_RING_SELECTION_CFG_RX_MPDU_START_OFFSET_M) >> \
+                    HTT_RX_RING_SELECTION_CFG_RX_MPDU_START_OFFSET_S)
+#define HTT_RX_RING_SELECTION_CFG_RX_MPDU_START_OFFSET_SET(_var, _val) \
+            do { \
+                HTT_CHECK_SET_VAL(HTT_RX_RING_SELECTION_CFG_RX_MPDU_START_OFFSET, _val); \
+                ((_var) |= ((_val) << HTT_RX_RING_SELECTION_CFG_RX_MPDU_START_OFFSET_S)); \
+            } while (0)
+
+#define HTT_RX_RING_SELECTION_CFG_RX_MSDU_END_OFFSET_M         0x0000ffff
+#define HTT_RX_RING_SELECTION_CFG_RX_MSDU_END_OFFSET_S         0
+#define HTT_RX_RING_SELECTION_CFG_RX_MSDU_END_OFFSET_GET(_var) \
+            (((_var) & HTT_RX_RING_SELECTION_CFG_RX_MSDU_END_OFFSET_M) >> \
+                    HTT_RX_RING_SELECTION_CFG_RX_MSDU_END_OFFSET_S)
+#define HTT_RX_RING_SELECTION_CFG_RX_MSDU_END_OFFSET_SET(_var, _val) \
+            do { \
+                HTT_CHECK_SET_VAL(HTT_RX_RING_SELECTION_CFG_RX_MSDU_END_OFFSET, _val); \
+                ((_var) |= ((_val) << HTT_RX_RING_SELECTION_CFG_RX_MSDU_END_OFFSET_S)); \
+            } while (0)
+
+#define HTT_RX_RING_SELECTION_CFG_RX_MSDU_START_OFFSET_M         0xffff0000
+#define HTT_RX_RING_SELECTION_CFG_RX_MSDU_START_OFFSET_S         16
+#define HTT_RX_RING_SELECTION_CFG_RX_MSDU_START_OFFSET_GET(_var) \
+            (((_var) & HTT_RX_RING_SELECTION_CFG_RX_MSDU_START_OFFSET_M) >> \
+                    HTT_RX_RING_SELECTION_CFG_RX_MSDU_START_OFFSET_S)
+#define HTT_RX_RING_SELECTION_CFG_RX_MSDU_START_OFFSET_SET(_var, _val) \
+            do { \
+                HTT_CHECK_SET_VAL(HTT_RX_RING_SELECTION_CFG_RX_MSDU_START_OFFSET, _val); \
+                ((_var) |= ((_val) << HTT_RX_RING_SELECTION_CFG_RX_MSDU_START_OFFSET_S)); \
+            } while (0)
+
+#define HTT_RX_RING_SELECTION_CFG_RX_ATTENTION_OFFSET_M         0x0000ffff
+#define HTT_RX_RING_SELECTION_CFG_RX_ATTENTION_OFFSET_S         0
+#define HTT_RX_RING_SELECTION_CFG_RX_ATTENTION_OFFSET_GET(_var) \
+            (((_var) & HTT_RX_RING_SELECTION_CFG_RX_ATTENTION_OFFSET_M) >> \
+                    HTT_RX_RING_SELECTION_CFG_RX_ATTENTION_OFFSET_S)
+#define HTT_RX_RING_SELECTION_CFG_RX_ATTENTION_OFFSET_SET(_var, _val) \
+            do { \
+                HTT_CHECK_SET_VAL(HTT_RX_RING_SELECTION_CFG_RX_ATTENTION_OFFSET, _val); \
+                ((_var) |= ((_val) << HTT_RX_RING_SELECTION_CFG_RX_ATTENTION_OFFSET_S)); \
             } while (0)
 
 /*
@@ -5599,6 +5754,7 @@ enum htt_t2h_msg_type {
     HTT_T2H_MSG_TYPE_MONITOR_MAC_HEADER_IND   = 0x20,
     HTT_T2H_MSG_TYPE_FLOW_POOL_RESIZE         = 0x21,
     HTT_T2H_MSG_TYPE_CFR_DUMP_COMPL_IND       = 0x22,
+    HTT_T2H_MSG_TYPE_PEER_STATS_IND           = 0x23,
 
     HTT_T2H_MSG_TYPE_TEST,
     /* keep this last */
@@ -6775,7 +6931,7 @@ A_COMPILE_TIME_ASSERT(HTT_RX_IND_hdr_size_quantum,
 
 #define HTT_RX_IND_HL_BYTES                               \
     (HTT_RX_IND_HDR_BYTES +                               \
-     4 /* single FW rx MSDU descriptor, plus padding */ + \
+     4 /* single FW rx MSDU descriptor */ + \
      4 /* single MPDU range information element */)
 #define HTT_RX_IND_HL_SIZE32 (HTT_RX_IND_HL_BYTES >> 2)
 
@@ -6812,6 +6968,14 @@ struct htt_rx_ind_hl_rx_desc_t {
             udp: 1,
             reserved: 1;
     } flags;
+    /* sa_ant_matrix
+     * For cases where a single rx chain has options to be connected to
+     * different rx antennas, show which rx antennas were in use during
+     * receipt of a given PPDU.
+     * This sa_ant_matrix provides a bitmask of the antennas used while
+     * receiving this frame.
+     */
+    A_UINT8 sa_ant_matrix;
 };
 
 #define HTT_RX_IND_HL_RX_DESC_VER_OFFSET \
@@ -6826,6 +6990,10 @@ struct htt_rx_ind_hl_rx_desc_t {
 #define HTT_RX_IND_HL_FLAG_OFFSET \
     (HTT_RX_IND_HL_RX_DESC_BASE_OFFSET \
      + offsetof(struct htt_rx_ind_hl_rx_desc_t, flags))
+
+#define HTT_RX_IND_HL_SA_ANT_MATRIX_OFFSET \
+    (HTT_RX_IND_HL_RX_DESC_BASE_OFFSET \
+     + offsetof(struct htt_rx_ind_hl_rx_desc_t, sa_ant_matrix))
 
 #define HTT_RX_IND_HL_FLAG_FIRST_MSDU   (0x01 << 0)
 #define HTT_RX_IND_HL_FLAG_LAST_MSDU    (0x01 << 1)
@@ -8066,22 +8234,27 @@ PREPACK struct htt_txq_group {
  * The following diagram shows the format of the TX completion indication sent
  * from the target to the host
  *
- *          |31   27|26|25|24|23        16| 15 |14 11|10   8|7          0|
- *          |------------------------------------------------------------|
- * header:  |  rsvd |TP|A1|A0|     num    | t_i| tid |status|  msg_type  |
- *          |------------------------------------------------------------|
- * payload: |           MSDU1 ID          |         MSDU0 ID             |
- *          |------------------------------------------------------------|
- *          :           MSDU3 ID          :         MSDU2 ID             :
- *          |------------------------------------------------------------|
- *          |         struct htt_tx_compl_ind_append_retries             |
- *          |- - - - -  - - - - - - - - - - - - - - - - - - - - - - - - -|
- *          |         struct htt_tx_compl_ind_append_tx_tstamp           |
- *          |- - - - -  - - - - - - - - - - - - - - - - - - - - - - - - -|
+ *          |31 28|27|26|25|24|23        16| 15 |14 11|10   8|7          0|
+ *          |-------------------------------------------------------------|
+ * header:  |rsvd |A2|TP|A1|A0|     num    | t_i| tid |status|  msg_type  |
+ *          |-------------------------------------------------------------|
+ * payload: |            MSDU1 ID          |         MSDU0 ID             |
+ *          |-------------------------------------------------------------|
+ *          :            MSDU3 ID          :         MSDU2 ID             :
+ *          |-------------------------------------------------------------|
+ *          |          struct htt_tx_compl_ind_append_retries             |
+ *          |- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -|
+ *          |          struct htt_tx_compl_ind_append_tx_tstamp           |
+ *          |- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -|
+ *          |           MSDU1 ACK RSSI     |        MSDU0 ACK RSSI        |
+ *          |-------------------------------------------------------------|
+ *          :           MSDU3 ACK RSSI     :        MSDU2 ACK RSSI        :
+ *          |- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -|
  * Where:
  *     A0 = append (a.k.a. append0)
  *     A1 = append1
  *     TP = MSDU tx power presence
+ *     A2 = append2
  *
  * The following field definitions describe the format of the TX completion
  * indication sent from the target to the host
@@ -8135,6 +8308,19 @@ PREPACK struct htt_txq_group {
  *            which MSDU ID.
  *   Value: 0 indicates MSDU tx power reports are not appended,
  *          1 indicates MSDU tx power reports are appended
+ * - append2
+ *   Bits 27:27
+ *   Purpose: Indicate whether data ACK RSSI is appended for each MSDU in
+ *            TX_COMP_IND message.  The order of the per-MSDU ACK RSSI report
+ *            matches the order of the MSDU IDs.  Although the ACK RSSI is the
+ *            same for all MSDUs witin a single PPDU, the RSSI is duplicated
+ *            for each MSDU, for convenience.
+ *            The ACK RSSI values are valid when status is COMPLETE_OK (and
+ *            this append2 bit is set).
+ *            The ACK RSSI values are SNR in dB, i.e. are the RSSI in units of
+ *            dB above the noise floor.
+ *   Value: 0 indicates MSDU ACK RSSI values are not appended,
+ *          1 indicates MSDU ACK RSSI values are appended.
  * Payload fields:
  * - hmsdu_id
  *   Bits 15:0
@@ -8156,6 +8342,8 @@ PREPACK struct htt_txq_group {
 #define HTT_TX_COMPL_IND_APPEND1_M     0x02000000
 #define HTT_TX_COMPL_IND_TX_POWER_S    26
 #define HTT_TX_COMPL_IND_TX_POWER_M    0x04000000
+#define HTT_TX_COMPL_IND_APPEND2_S     27
+#define HTT_TX_COMPL_IND_APPEND2_M     0x08000000
 
 #define HTT_TX_COMPL_IND_STATUS_SET(_info, _val)                        \
     do {                                                                \
@@ -8207,6 +8395,14 @@ PREPACK struct htt_txq_group {
     } while (0)
 #define HTT_TX_COMPL_IND_TX_POWER_GET(_info)                             \
     (((_info) & HTT_TX_COMPL_IND_TX_POWER_M) >> HTT_TX_COMPL_IND_TX_POWER_S)
+#define HTT_TX_COMPL_IND_APPEND2_SET(_info, _val)                      \
+    do {                                                               \
+        HTT_CHECK_SET_VAL(HTT_TX_COMPL_IND_APPEND2, _val);             \
+        ((_info) |= ((_val) << HTT_TX_COMPL_IND_APPEND2_S));           \
+    } while (0)
+#define HTT_TX_COMPL_IND_APPEND2_GET(_info)                            \
+    (((_info) & HTT_TX_COMPL_IND_APPEND2_M) >> HTT_TX_COMPL_IND_APPEND2_S)
+
 #define HTT_TX_COMPL_INV_TX_POWER           0xffff
 
 #define HTT_TX_COMPL_CTXT_SZ                sizeof(A_UINT16)
@@ -10299,6 +10495,27 @@ enum htt_dbg_ext_stats_status {
     (((word) & HTT_T2H_PPDU_STATS_PPDU_ID_M) >> \
     HTT_T2H_PPDU_STATS_PPDU_ID_S)
 
+/* htt_t2h_ppdu_stats_ind_hdr_t
+ * This struct contains the fields within the header of the
+ * HTT_T2H_PPDU_STATS_IND message, preceding the type-specific
+ * stats info.
+ * This struct assumes little-endian layout, and thus is only
+ * suitable for use within processors known to be little-endian
+ * (such as the target).
+ * In contrast, the above macros provide endian-portable methods
+ * to get and set the bitfields within this PPDU_STATS_IND header.
+ */
+typedef struct {
+    A_UINT32 msg_type:      8, /* bits  7:0 */
+             mac_id:        2, /* bits  9:8 */
+             pdev_id:       2, /* bits 11:10 */
+             reserved1:     4, /* bits 15:12 */
+             payload_size: 16; /* bits 31:16 */
+    A_UINT32 ppdu_id;
+    A_UINT32 timestamp_us;
+    A_UINT32 reserved2;
+} htt_t2h_ppdu_stats_ind_hdr_t;
+
 /**
  * @brief target -> host extended statistics upload
  *
@@ -10756,8 +10973,12 @@ typedef enum {
     /* This message type is currently used for the below purpose:
      *
      * - capture_method = WMI_PEER_CFR_CAPTURE_METHOD_NULL_FRAME in the
-     *   wmi_peer_cfr_capture_cmd. The associated memory region gets allocated
-     *   through WMI_CHANNEL_CAPTURE_HOST_MEM_REQ_ID
+     *   wmi_peer_cfr_capture_cmd.
+     *   If payload_present bit is set to 0 then the associated memory region
+     *   gets allocated through WMI_CHANNEL_CAPTURE_HOST_MEM_REQ_ID.
+     *   If payload_present bit is set to 1 then CFR dump is part of the HTT
+     *   message; the CFR dump will be present at the end of the message,
+     *   after the chan_phy_mode.
      */
     HTT_PEER_CFR_CAPTURE_MSG_TYPE_1  = 0x1,
 
@@ -10781,10 +11002,10 @@ typedef enum {
  *
  * **************************************************************************
  *
- *          |31                           16|15                   |7        0|
+ *          |31                           16|15                 |8|7        0|
  *          |----------------------------------------------------------------|
- * header:  |                           reserved                  | msg_type |
- * word 0   |                                                     |          |
+ * header:  |                           reserved                |P| msg_type |
+ * word 0   |                                                   | |          |
  *          |----------------------------------------------------------------|
  * payload: |                      cfr_capture_msg_type                      |
  * word 1   |                                                                |
@@ -10823,6 +11044,7 @@ typedef enum {
  * word 12  |                                                                |
  *          |----------------------------------------------------------------|
  * where,
+ * P       - payload present bit (payload_present explained below)
  * req_id  - memory request id (mem_req_id explained below)
  * S       - status field (status explained below)
  * capbw   - capture bandwidth (capture_bw explained below)
@@ -10841,8 +11063,15 @@ typedef enum {
  *   Bits 7:0
  *   Purpose: Identifies this as CFR TX completion indication
  *   Value: HTT_T2H_MSG_TYPE_CFR_DUMP_COMPL_IND
+ * - payload_present
+ *   Bit 8
+ *   Purpose: Identifies how CFR data is sent to host
+ *   Value: 0 - If CFR Payload is written to host memory
+ *          1 - If CFR Payload is sent as part of HTT message
+ *              (This is the requirement for SDIO/USB where it is
+ *               not possible to write CFR data to host memory)
  * - reserved
- *   Bits 31:8
+ *   Bits 31:9
  *   Purpose: Reserved
  *   Value: 0
  *
@@ -10861,7 +11090,8 @@ typedef enum {
  *   Bits 6:0
  *   Purpose: Contain the mem request id of the region where the CFR capture
  *       has been stored - of type WMI_HOST_MEM_REQ_ID
- *   Value: WMI_CHANNEL_CAPTURE_HOST_MEM_REQ_ID
+ *   Value: WMI_CHANNEL_CAPTURE_HOST_MEM_REQ_ID (if payload_present is 1,
+            this value is invalid)
  * - status
  *   Bit 7
  *   Purpose: Boolean value carrying the status of the CFR capture of the peer
@@ -10991,6 +11221,22 @@ PREPACK struct htt_cfr_dump_compl_ind {
 } POSTPACK;
 
 /*
+ * Get / set macros for the bit fields within WORD-1 of htt_cfr_dump_compl_ind,
+ * msg_type = HTT_PEER_CFR_CAPTURE_MSG_TYPE_1
+ */
+#define HTT_T2H_CFR_DUMP_PAYLOAD_PRESENT_ID_M      0x00000100
+#define HTT_T2H_CFR_DUMP_PAYLOAD_PRESENT_ID_S      8
+
+#define HTT_T2H_CFR_DUMP_PAYLOAD_PRESENT_ID_SET(word, value) \
+  do { \
+         HTT_CHECK_SET_VAL(HTT_T2H_CFR_DUMP_PAYLOAD_PRESENT_ID, value); \
+         (word)  |= (value) << HTT_T2H_CFR_DUMP_PAYLOAD_PRESENT_ID_S;   \
+     } while(0)
+#define HTT_T2H_CFR_DUMP_PAYLOAD_PRESENT_ID_GET(word) \
+       (((word) & HTT_T2H_CFR_DUMP_PAYLOAD_PRESENT_ID_M) >> \
+           HTT_T2H_CFR_DUMP_PAYLOAD_PRESENT_ID_S)
+
+/*
  * Get / set macros for the bit fields within WORD-2 of htt_cfr_dump_compl_ind,
  * msg_type = HTT_PEER_CFR_CAPTURE_MSG_TYPE_1
  */
@@ -11082,5 +11328,99 @@ PREPACK struct htt_cfr_dump_compl_ind {
 #define HTT_T2H_CFR_DUMP_TYPE1_VDEV_ID_GET(word) \
         (((word) & HTT_T2H_CFR_DUMP_TYPE1_VDEV_ID_M) >> \
             HTT_T2H_CFR_DUMP_TYPE1_VDEV_ID_S)
+
+
+/**
+ * @brief target -> host peer (PPDU) stats message
+ * HTT_T2H_MSG_TYPE_PEER_STATS_IND
+ * @details
+ * This message is generated by FW when FW is sending stats to  host
+ * about one or more PPDUs that the FW has transmitted to one or more peers.
+ * This message is sent autonomously by the target rather than upon request
+ * by the host.
+ * The following field definitions describe the format of the HTT target
+ * to host peer stats indication message.
+ *
+ * The HTT_T2H PPDU_STATS_IND message has a header followed by one
+ * or more PPDU stats records.
+ * Each PPDU stats record uses a htt_tx_ppdu_stats_info TLV.
+ * If the details of N PPDUS are sent in one PEER_STATS_IND message,
+ * then the message would start with the
+ * header, followed by N htt_tx_ppdu_stats_info structures, as depicted
+ * below.
+ *
+ *       |31                            16|15|14|13 11|10 9|8|7       0|
+ *       |-------------------------------------------------------------|
+ *       |                        reserved                   |MSG_TYPE |
+ *       |-------------------------------------------------------------|
+ * rec 0 |                             TLV header                      |
+ * rec 0 |-------------------------------------------------------------|
+ * rec 0 |                      ppdu successful bytes                  |
+ * rec 0 |-------------------------------------------------------------|
+ * rec 0 |                        ppdu retry bytes                     |
+ * rec 0 |-------------------------------------------------------------|
+ * rec 0 |                        ppdu failed bytes                    |
+ * rec 0 |-------------------------------------------------------------|
+ * rec 0 |              peer id           | S|SG|  BW | BA |A|rate code|
+ * rec 0 |-------------------------------------------------------------|
+ * rec 0 |        retried MSDUs           |       successful MSDUs     |
+ * rec 0 |-------------------------------------------------------------|
+ * rec 0 |         TX duration            |         failed MSDUs       |
+ * rec 0 |-------------------------------------------------------------|
+ *                                       ...
+ *       |-------------------------------------------------------------|
+ * rec N |                             TLV header                      |
+ * rec N |-------------------------------------------------------------|
+ * rec N |                      ppdu successful bytes                  |
+ * rec N |-------------------------------------------------------------|
+ * rec N |                        ppdu retry bytes                     |
+ * rec N |-------------------------------------------------------------|
+ * rec N |                        ppdu failed bytes                    |
+ * rec N |-------------------------------------------------------------|
+ * rec N |              peer id           | S|SG|  BW | BA |A|rate code|
+ * rec N |-------------------------------------------------------------|
+ * rec N |        retried MSDUs           |       successful MSDUs     |
+ * rec N |-------------------------------------------------------------|
+ * rec N |         TX duration            |         failed MSDUs       |
+ * rec N |-------------------------------------------------------------|
+ *
+ * where:
+ *     A  = is A-MPDU flag
+ *     BA = block-ack failure flags
+ *     BW = bandwidth spec
+ *     SG = SGI enabled spec
+ *     S  = skipped rate ctrl
+ * One htt_tx_ppdu_stats_info instance will have stats for one PPDU
+ *
+ * Header
+ * ------
+ * dword0 - b'0:7  - msg_type : HTT_T2H_MSG_TYPE_PEER_STATS_IND
+ * dword0 - b'8:31 - reserved : Reserved for future use
+ *
+ * payload include below peer_stats information
+ * --------------------------------------------
+ * @TLV : HTT_PPDU_STATS_INFO_TLV
+ * @tx_success_bytes : total successful bytes in the PPDU.
+ * @tx_retry_bytes   : total retried bytes in the PPDU.
+ * @tx_failed_bytes  : total failed bytes in the PPDU.
+ * @tx_ratecode      : rate code used for the PPDU.
+ * @is_ampdu         : Indicates PPDU is AMPDU or not.
+ * @ba_ack_failed    : BA/ACK failed for this PPDU
+ *                     b00 -> BA received
+ *                     b01 -> BA failed once
+ *                     b10 -> BA failed twice, when HW retry is enabled.
+ * @bw               : BW
+ *                     b00 -> 20 MHz
+ *                     b01 -> 40 MHz
+ *                     b10 -> 80 MHz
+ *                     b11 -> 160 MHz (or 80+80)
+ * @sg               : SGI enabled
+ * @s                : skipped ratectrl
+ * @peer_id          : peer id
+ * @tx_success_msdus : successful MSDUs
+ * @tx_retry_msdus   : retried MSDUs
+ * @tx_failed_msdus  : MSDUs dropped in FW after max retry
+ * @tx_duration      : Tx duration for the PPDU (microsecond units)
+ */
 
 #endif

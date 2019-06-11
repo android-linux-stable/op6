@@ -278,4 +278,14 @@ void dsi_phy_drv_register(void);
  */
 void dsi_phy_drv_unregister(void);
 
+/**
+ * dsi_phy_update_phy_timings() - Update dsi phy timings
+ * @phy:	DSI PHY handle
+ * @config:	DSI Host config parameters
+ *
+ * Return: error code.
+ */
+int dsi_phy_update_phy_timings(struct msm_dsi_phy *phy,
+			       struct dsi_host_config *config);
+
 #endif /* _DSI_PHY_H_ */

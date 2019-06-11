@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012-2018 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2012-2019 The Linux Foundation. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -3618,6 +3618,13 @@ struct reg_table_entry g_registry_table[] = {
 		     CFG_ENABLE_NON_DFS_CHAN_ON_RADAR_MIN,
 		     CFG_ENABLE_NON_DFS_CHAN_ON_RADAR_MAX),
 
+	REG_VARIABLE(CFG_ENABLE_RTT_SUPPORT, WLAN_PARAM_Integer,
+		     struct hdd_config, enable_rtt_support,
+		     VAR_FLAGS_OPTIONAL,
+		     CFG_ENABLE_RTT_SUPPORT_DEFAULT,
+		     CFG_ENABLE_RTT_SUPPORT_MIN,
+		     CFG_ENABLE_RTT_SUPPORT_MAX ),
+
 	REG_VARIABLE(CFG_P2P_LISTEN_DEFER_INTERVAL_NAME, WLAN_PARAM_Integer,
 		     struct hdd_config, p2p_listen_defer_interval,
 		     VAR_FLAGS_OPTIONAL |
@@ -4083,6 +4090,13 @@ struct reg_table_entry g_registry_table[] = {
 		CFG_ROAM_SCAN_TRIGGER_REASON_BITMASK_MIN,
 		CFG_ROAM_SCAN_TRIGGER_REASON_BITMASK_MAX),
 
+	REG_VARIABLE(CFG_ROAM_SCAN_SCAN_POLICY_NAME, WLAN_PARAM_Integer,
+		     struct hdd_config, roaming_scan_policy,
+		     VAR_FLAGS_OPTIONAL | VAR_FLAGS_RANGE_CHECK_ASSUME_DEFAULT,
+		     CFG_ROAM_SCAN_SCAN_POLICY_DEFAULT,
+		     CFG_ROAM_SCAN_SCAN_POLICY_MIN,
+		     CFG_ROAM_SCAN_SCAN_POLICY_MAX),
+
 	REG_VARIABLE(CFG_ENABLE_FATAL_EVENT_TRIGGER, WLAN_PARAM_Integer,
 			struct hdd_config, enable_fatal_event,
 			VAR_FLAGS_OPTIONAL |
@@ -4285,6 +4299,13 @@ struct reg_table_entry g_registry_table[] = {
 		CFG_ADAPTIVE_EXTSCAN_DWELL_MODE_DEFAULT,
 		CFG_ADAPTIVE_EXTSCAN_DWELL_MODE_MIN,
 		CFG_ADAPTIVE_EXTSCAN_DWELL_MODE_MAX),
+
+	REG_VARIABLE(CFG_HONOUR_NL_SCAN_POLICY_FLAGS_NAME, WLAN_PARAM_Integer,
+		     struct hdd_config, honour_nl_scan_policy_flags,
+		     VAR_FLAGS_OPTIONAL | VAR_FLAGS_RANGE_CHECK_ASSUME_DEFAULT,
+		     CFG_HONOUR_NL_SCAN_POLICY_FLAGS_DEFAULT,
+		     CFG_HONOUR_NL_SCAN_POLICY_FLAGS_MIN,
+		     CFG_HONOUR_NL_SCAN_POLICY_FLAGS_MAX),
 
 	REG_VARIABLE(CFG_ADAPTIVE_DWELL_MODE_ENABLED_NAME, WLAN_PARAM_Integer,
 		struct hdd_config, adaptive_dwell_mode_enabled,
@@ -5460,6 +5481,13 @@ struct reg_table_entry g_registry_table[] = {
 		     CFG_RX_CHAIN_MASK_5G_MIN,
 		     CFG_RX_CHAIN_MASK_5G_MAX),
 
+	REG_VARIABLE(CFG_BTM_ENABLE_NAME, WLAN_PARAM_HexInteger,
+		     struct hdd_config, btm_offload_config,
+		     VAR_FLAGS_OPTIONAL | VAR_FLAGS_RANGE_CHECK_ASSUME_DEFAULT,
+		     CFG_BTM_ENABLE_DEFAULT,
+		     CFG_BTM_ENABLE_MIN,
+		     CFG_BTM_ENABLE_MAX),
+
 	REG_VARIABLE(CFG_FORCE_RSNE_OVERRIDE_NAME, WLAN_PARAM_Integer,
 		     struct hdd_config, force_rsne_override,
 		     VAR_FLAGS_OPTIONAL | VAR_FLAGS_RANGE_CHECK_ASSUME_DEFAULT,
@@ -5592,6 +5620,35 @@ struct reg_table_entry g_registry_table[] = {
 		CFG_IS_SAE_ENABLED_MIN,
 		CFG_IS_SAE_ENABLED_MAX),
 #endif
+
+	REG_VARIABLE(CFG_BTM_SOLICITED_TIMEOUT, WLAN_PARAM_Integer,
+		     struct hdd_config, btm_solicited_timeout,
+		     VAR_FLAGS_OPTIONAL | VAR_FLAGS_RANGE_CHECK_ASSUME_DEFAULT,
+		     CFG_BTM_SOLICITED_TIMEOUT_DEFAULT,
+		     CFG_BTM_SOLICITED_TIMEOUT_MIN,
+		     CFG_BTM_SOLICITED_TIMEOUT_MAX),
+
+	REG_VARIABLE(CFG_BTM_MAX_ATTEMPT_CNT, WLAN_PARAM_Integer,
+		     struct hdd_config, btm_max_attempt_cnt,
+		     VAR_FLAGS_OPTIONAL | VAR_FLAGS_RANGE_CHECK_ASSUME_DEFAULT,
+		     CFG_BTM_MAX_ATTEMPT_CNT_DEFAULT,
+		     CFG_BTM_MAX_ATTEMPT_CNT_MIN,
+		     CFG_BTM_MAX_ATTEMPT_CNT_MAX),
+
+	REG_VARIABLE(CFG_BTM_STICKY_TIME, WLAN_PARAM_Integer,
+		     struct hdd_config, btm_sticky_time,
+		     VAR_FLAGS_OPTIONAL | VAR_FLAGS_RANGE_CHECK_ASSUME_DEFAULT,
+		     CFG_BTM_STICKY_TIME_DEFAULT,
+		     CFG_BTM_STICKY_TIME_MIN,
+		     CFG_BTM_STICKY_TIME_MAX),
+
+	REG_VARIABLE(CFG_BTM_QUERY_BITMASK_NAME,
+		     WLAN_PARAM_HexInteger, struct hdd_config,
+		     btm_query_bitmask,
+		     VAR_FLAGS_OPTIONAL | VAR_FLAGS_RANGE_CHECK_ASSUME_DEFAULT,
+		     CFG_BTM_QUERY_BITMASK_DEFAULT,
+		     CFG_BTM_QUERY_BITMASK_MIN,
+		     CFG_BTM_QUERY_BITMASK_MAX),
 
 	REG_VARIABLE(CFG_ENABLE_RTT_MAC_RANDOMIZATION_NAME,
 		     WLAN_PARAM_Integer,
@@ -5746,6 +5803,14 @@ struct reg_table_entry g_registry_table[] = {
 		     CFG_ROAM_PREAUTH_NO_ACK_TIMEOUT_DEFAULT,
 		     CFG_ROAM_PREAUTH_NO_ACK_TIMEOUT_MIN,
 		     CFG_ROAM_PREAUTH_NO_ACK_TIMEOUT_MAX),
+
+	REG_VARIABLE(CFG_NTH_BEACON_REPORTING_OFFLOAD_NAME,
+		     WLAN_PARAM_Integer,
+		     struct hdd_config, beacon_reporting,
+		     VAR_FLAGS_OPTIONAL | VAR_FLAGS_RANGE_CHECK_ASSUME_DEFAULT,
+		     CFG_NTH_BEACON_REPORTING_OFFLOAD_DEFAULT,
+		     CFG_NTH_BEACON_REPORTING_OFFLOAD_MIN,
+		     CFG_NTH_BEACON_REPORTING_OFFLOAD_MAX),
 };
 
 /**
@@ -6007,12 +6072,13 @@ static int parse_hex_digit(char c)
  *
  * Return: None
  */
-static void update_mac_from_string(hdd_context_t *pHddCtx,
-				   tCfgIniEntry *macTable, int num)
+static QDF_STATUS update_mac_from_string(hdd_context_t *pHddCtx,
+					 tCfgIniEntry *macTable, int num)
 {
 	int i = 0, j = 0, res = 0;
 	char *candidate = NULL;
 	struct qdf_mac_addr macaddr[QDF_MAX_CONCURRENCY_PERSONA];
+	QDF_STATUS status = QDF_STATUS_SUCCESS;
 
 	memset(macaddr, 0, sizeof(macaddr));
 
@@ -6030,8 +6096,12 @@ static void update_mac_from_string(hdd_context_t *pHddCtx,
 				     provisioned_mac_addr[i].bytes[0],
 				     (uint8_t *) &macaddr[i].bytes[0],
 				     QDF_MAC_ADDR_SIZE);
+		} else {
+			status = QDF_STATUS_E_FAILURE;
+			break;
 		}
 	}
+	return status;
 }
 
 /**
@@ -7390,6 +7460,9 @@ void hdd_cfg_print(hdd_context_t *pHddCtx)
 		CFG_ROAM_SCAN_TRIGGER_REASON_BITMASK_NAME,
 		pHddCtx->config->roam_trigger_reason_bitmask);
 	hdd_debug("Name = [%s] Value = [%u]",
+		  CFG_ROAM_SCAN_SCAN_POLICY_NAME,
+		  pHddCtx->config->roaming_scan_policy);
+	hdd_debug("Name = [%s] Value = [%u]",
 		CFG_MIN_REST_TIME_NAME,
 		pHddCtx->config->min_rest_time_conc);
 	hdd_debug("Name = [%s] Value = [%u]",
@@ -7475,6 +7548,9 @@ void hdd_cfg_print(hdd_context_t *pHddCtx)
 	hdd_debug("Name = [%s] Value = [%u]",
 		CFG_ADAPTIVE_EXTSCAN_DWELL_MODE_NAME,
 		pHddCtx->config->extscan_adaptive_dwell_mode);
+	hdd_debug("Name = [%s] Value = [%u]",
+		  CFG_HONOUR_NL_SCAN_POLICY_FLAGS_NAME,
+		  pHddCtx->config->honour_nl_scan_policy_flags);
 	hdd_debug("Name = [%s] Value = [%u]",
 		CFG_ADAPTIVE_DWELL_MODE_ENABLED_NAME,
 		pHddCtx->config->adaptive_dwell_mode_enabled);
@@ -7768,6 +7844,19 @@ void hdd_cfg_print(hdd_context_t *pHddCtx)
 		  pHddCtx->config->roam_preauth_no_ack_timeout);
 	hdd_cfg_print_action_oui(pHddCtx);
 	hdd_cfg_print_btc_params(pHddCtx);
+	hdd_debug("Name = [btm_offload_config] value = [0x%x]",
+		  pHddCtx->config->btm_offload_config);
+	hdd_debug("Name = [btm_solicited_timeout] value = [0x%x]",
+		  pHddCtx->config->btm_solicited_timeout);
+	hdd_debug("Name = [btm_max_attempt_cnt] value = [0x%x]",
+		  pHddCtx->config->btm_max_attempt_cnt);
+	hdd_debug("Name = [btm_sticky_time] value = [0x%x]",
+		  pHddCtx->config->btm_sticky_time);
+	hdd_debug("Name = [btm_query_bitmask] value = [0x%x]",
+		  pHddCtx->config->btm_query_bitmask);
+	hdd_debug("Name = [%s] value = [%u]",
+		  CFG_NTH_BEACON_REPORTING_OFFLOAD_NAME,
+		  pHddCtx->config->beacon_reporting);
 }
 
 /**
@@ -7859,7 +7948,7 @@ QDF_STATUS hdd_update_mac_config(hdd_context_t *pHddCtx)
 		buffer = line;
 	}
 
-	if (i <= QDF_MAX_CONCURRENCY_PERSONA) {
+	if (i != 0 && i <= QDF_MAX_CONCURRENCY_PERSONA) {
 		hdd_debug("%d Mac addresses provided", i);
 	} else {
 		hdd_err("invalid number of Mac address provided, nMac = %d", i);
@@ -7867,7 +7956,11 @@ QDF_STATUS hdd_update_mac_config(hdd_context_t *pHddCtx)
 		goto config_exit;
 	}
 
-	update_mac_from_string(pHddCtx, &macTable[0], i);
+	qdf_status = update_mac_from_string(pHddCtx, &macTable[0], i);
+	if (QDF_IS_STATUS_ERROR(qdf_status)) {
+		hdd_err("Invalid MAC addresses provided");
+		goto config_exit;
+	}
 	pHddCtx->num_provisioned_addr = i;
 	hdd_debug("Populating remaining %d Mac addreses",
 		   max_mac_addr - i);
@@ -10323,6 +10416,8 @@ QDF_STATUS hdd_set_sme_config(hdd_context_t *pHddCtx)
 		pHddCtx->config->min_delay_btw_roam_scans;
 	smeConfig->csrConfig.roam_trigger_reason_bitmask =
 		pHddCtx->config->roam_trigger_reason_bitmask;
+	smeConfig->csrConfig.roaming_scan_policy =
+		pHddCtx->config->roaming_scan_policy;
 	smeConfig->csrConfig.obss_width_interval =
 			pHddCtx->config->obss_width_trigger_interval;
 	smeConfig->csrConfig.obss_active_dwelltime =
@@ -10337,6 +10432,8 @@ QDF_STATUS hdd_set_sme_config(hdd_context_t *pHddCtx)
 			pHddCtx->config->scan_adaptive_dwell_mode;
 	smeConfig->csrConfig.scan_adaptive_dwell_mode_nc =
 			pHddCtx->config->scan_adaptive_dwell_mode_nc;
+	smeConfig->csrConfig.honour_nl_scan_policy_flags =
+			pHddCtx->config->honour_nl_scan_policy_flags;
 	smeConfig->csrConfig.roamscan_adaptive_dwell_mode =
 			pHddCtx->config->roamscan_adaptive_dwell_mode;
 	smeConfig->csrConfig.roam_force_rssi_trigger =
@@ -10454,6 +10551,17 @@ QDF_STATUS hdd_set_sme_config(hdd_context_t *pHddCtx)
 		(pConfig->rssi_assoc_reject_enabled *
 		WMI_VDEV_OCE_REASSOC_REJECT_FEATURE_BITMAP);
 	smeConfig->csrConfig.oce_feature_bitmap = val;
+
+	smeConfig->csrConfig.btm_offload_config =
+			pHddCtx->config->btm_offload_config;
+	smeConfig->csrConfig.btm_solicited_timeout =
+			pHddCtx->config->btm_solicited_timeout;
+	smeConfig->csrConfig.btm_max_attempt_cnt =
+			pHddCtx->config->btm_max_attempt_cnt;
+	smeConfig->csrConfig.btm_sticky_time =
+			pHddCtx->config->btm_sticky_time;
+	smeConfig->csrConfig.btm_query_bitmask =
+			pHddCtx->config->btm_query_bitmask;
 
 	hdd_update_bss_score_params(pHddCtx->config,
 			&smeConfig->csrConfig.bss_score_params);

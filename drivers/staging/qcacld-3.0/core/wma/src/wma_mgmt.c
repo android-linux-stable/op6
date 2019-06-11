@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2013-2018 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2013-2019 The Linux Foundation. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -91,10 +91,16 @@ static void wma_send_bcn_buf_ll(tp_wma_handle wma,
 	uint8_t i;
 
 	bcn = wma->interfaces[vdev_id].beacon;
-	if (!bcn->buf) {
+	if (!bcn || !bcn->buf) {
 		WMA_LOGE("%s: Invalid beacon buffer", __func__);
 		return;
 	}
+
+	if (!param_buf->tim_info || !param_buf->p2p_noa_info) {
+		WMA_LOGE("%s: Invalid tim info or p2p noa info", __func__);
+		return;
+	}
+
 	if (WMI_UNIFIED_NOA_ATTR_NUM_DESC_GET(p2p_noa_info) >
 			WMI_P2P_MAX_NOA_DESCRIPTORS) {
 		WMA_LOGE("%s: Too many descriptors %d", __func__,
@@ -1756,6 +1762,7 @@ static QDF_STATUS wma_setup_install_key_cmd(tp_wma_handle wma_handle,
 	if (iface)
 		iface->is_waiting_for_key = false;
 
+	qdf_mem_zero(&params, sizeof(struct set_key_params));
 	return status;
 }
 
@@ -1881,6 +1888,8 @@ void wma_set_bsskey(tp_wma_handle wma_handle, tpSetBssKeyParams key_info)
 	wma_handle->ibss_started++;
 	/* TODO: Should we wait till we get HTT_T2H_MSG_TYPE_SEC_IND? */
 	key_info->status = QDF_STATUS_SUCCESS;
+
+	qdf_mem_zero(&key_params, sizeof(struct wma_set_key_params));
 
 out:
 	wma_send_msg_high_priority(wma_handle,
@@ -2201,6 +2210,7 @@ void wma_set_stakey(tp_wma_handle wma_handle, tpSetStaKeyParams key_info)
 	/* TODO: Should we wait till we get HTT_T2H_MSG_TYPE_SEC_IND? */
 	key_info->status = QDF_STATUS_SUCCESS;
 out:
+	qdf_mem_zero(&key_params, sizeof(struct wma_set_key_params));
 	if (key_info->sendRsp)
 		wma_send_msg_high_priority(wma_handle, WMA_SET_STAKEY_RSP,
 			(void *)key_info, 0);
@@ -2423,9 +2433,9 @@ static QDF_STATUS wma_store_bcn_tmpl(tp_wma_handle wma, uint8_t vdev_id,
 	}
 
 	len = *(u32 *) &bcn_info->beacon[0];
-	if (len > SIR_MAX_BEACON_SIZE) {
-		WMA_LOGE("%s: Received beacon len %d exceeding max limit %d",
-			 __func__, len, SIR_MAX_BEACON_SIZE);
+	if (len > SIR_MAX_BEACON_SIZE - sizeof(uint32_t)) {
+		WMA_LOGE("%s: Received beacon len %u exceeding max limit %zu",
+			 __func__, len, SIR_MAX_BEACON_SIZE - sizeof(uint32_t));
 		return QDF_STATUS_E_INVAL;
 	}
 	WMA_LOGD("%s: Storing received beacon template buf to local buffer",
@@ -2628,11 +2638,13 @@ void wma_send_beacon(tp_wma_handle wma, tpSendbeaconParams bcn_info)
 	struct sAniBeaconStruct *beacon;
 	struct vdev_up_params param = {0};
 
+	WMA_LOGD("Beacon update reason %d", bcn_info->reason);
 	beacon = (struct sAniBeaconStruct *) (bcn_info->beacon);
 	vdev = wma_find_vdev_by_addr(wma, beacon->macHdr.sa, &vdev_id);
 	if (!vdev) {
 		WMA_LOGE("%s : failed to get vdev handle", __func__);
-		return;
+		status = QDF_STATUS_E_INVAL;
+		goto send_rsp;
 	}
 
 	if (WMI_SERVICE_IS_ENABLED(wma->wmi_service_bitmap,
@@ -2642,7 +2654,7 @@ void wma_send_beacon(tp_wma_handle wma, tpSendbeaconParams bcn_info)
 		if (QDF_IS_STATUS_ERROR(status)) {
 			WMA_LOGE("%s : wmi_unified_bcn_tmpl_send Failed ",
 				 __func__);
-			return;
+			goto send_rsp;
 		}
 
 		if (bcn_info->p2pIeOffset) {
@@ -2653,14 +2665,15 @@ void wma_send_beacon(tp_wma_handle wma, tpSendbeaconParams bcn_info)
 							 p2p_ie) < 0) {
 				WMA_LOGE("%s : wmi_unified_bcn_tmpl_send Failed ",
 					__func__);
-				return;
+				status = QDF_STATUS_E_INVAL;
+				goto send_rsp;
 			}
 		}
 	}
 	status = wma_store_bcn_tmpl(wma, vdev_id, bcn_info);
 	if (status != QDF_STATUS_SUCCESS) {
 		WMA_LOGE("%s : wma_store_bcn_tmpl Failed", __func__);
-		return;
+		goto send_rsp;
 	}
 	if (!((qdf_atomic_read(
 		&wma->interfaces[vdev_id].vdev_restart_params.
@@ -2674,7 +2687,7 @@ void wma_send_beacon(tp_wma_handle wma, tpSendbeaconParams bcn_info)
 			if (QDF_IS_STATUS_ERROR(status)) {
 				WMA_LOGE(FL("failed to send vdev up"));
 				cds_set_do_hw_mode_change_flag(false);
-				return;
+				goto send_rsp;
 			}
 			wma->interfaces[vdev_id].vdev_up = true;
 			WMA_LOGD(FL("Setting vdev_up flag to true"));
@@ -2682,6 +2695,10 @@ void wma_send_beacon(tp_wma_handle wma, tpSendbeaconParams bcn_info)
 			wma_set_vdev_mgmt_rate(wma, vdev_id);
 		}
 	}
+
+send_rsp:
+	bcn_info->status = status;
+	wma_send_msg(wma, WMA_SEND_BCN_RSP, (void *)bcn_info, 0);
 }
 
 /**

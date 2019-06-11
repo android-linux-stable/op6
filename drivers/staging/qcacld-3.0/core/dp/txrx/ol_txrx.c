@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011-2018 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2011-2019 The Linux Foundation. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -3753,7 +3753,7 @@ int ol_txrx_peer_unref_delete(ol_txrx_peer_handle peer,
 		qdf_spin_unlock_bh(&pdev->peer_map_unmap_lock);
 	} else {
 		qdf_spin_unlock_bh(&pdev->peer_ref_mutex);
-		QDF_TRACE(QDF_MODULE_ID_TXRX, QDF_TRACE_LEVEL_INFO_HIGH,
+		QDF_TRACE(QDF_MODULE_ID_TXRX, QDF_TRACE_LEVEL_DEBUG,
 			  "[%s][%d]: ref delete peer %pK peer->ref_cnt = %d",
 			  fname, line, peer, rc);
 	}
@@ -3839,10 +3839,7 @@ void peer_unmap_timer_handler(unsigned long data)
 		 peer->mac_addr.raw[4], peer->mac_addr.raw[5]);
 	if (!cds_is_driver_recovering() && !cds_is_fw_down()) {
 		wma_peer_debug_dump();
-		if (cds_is_self_recovery_enabled())
-			cds_trigger_recovery(CDS_PEER_UNMAP_TIMEDOUT);
-		else
-			QDF_BUG(0);
+		cds_trigger_recovery(CDS_PEER_UNMAP_TIMEDOUT);
 	} else {
 		WMA_LOGE("%s: Recovery is in progress, ignore!", __func__);
 	}
@@ -3879,7 +3876,7 @@ void ol_txrx_peer_detach(ol_txrx_peer_handle peer, bool start_peer_unmap_timer)
 	/* debug print to dump rx reorder state */
 	/* htt_rx_reorder_log_print(vdev->pdev->htt_pdev); */
 
-	QDF_TRACE(QDF_MODULE_ID_TXRX, QDF_TRACE_LEVEL_INFO,
+	QDF_TRACE(QDF_MODULE_ID_TXRX, QDF_TRACE_LEVEL_DEBUG,
 		   "%s:peer %pK (%02x:%02x:%02x:%02x:%02x:%02x)",
 		   __func__, peer,
 		   peer->mac_addr.raw[0], peer->mac_addr.raw[1],
@@ -5282,6 +5279,11 @@ void ol_txrx_ipa_uc_set_quota(ol_txrx_pdev_handle pdev, uint64_t quota_bytes)
 {
 	htt_h2t_ipa_uc_set_quota(pdev->htt_pdev, quota_bytes);
 }
+
+int ol_txrx_rx_hash_smmu_map(ol_txrx_pdev_handle pdev, bool map)
+{
+	return htt_rx_hash_smmu_map_update(pdev->htt_pdev, map);
+}
 #endif /* IPA_UC_OFFLOAD */
 
 QDF_STATUS ol_txrx_display_stats(uint16_t value,
@@ -6197,9 +6199,4 @@ QDF_STATUS ol_txrx_set_wisa_mode(ol_txrx_vdev_handle vdev, bool enable)
 
 	vdev->is_wisa_mode_enable = enable;
 	return QDF_STATUS_SUCCESS;
-}
-
-int ol_txrx_rx_hash_smmu_map(ol_txrx_pdev_handle pdev, bool map)
-{
-	return htt_rx_hash_smmu_map_update(pdev->htt_pdev, map);
 }

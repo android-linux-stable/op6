@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011-2018 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2011-2019 The Linux Foundation. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -3886,6 +3886,9 @@ void hdd_clear_roam_profile_ie(hdd_adapter_t *pAdapter)
 
 	qdf_mem_zero(pWextState->roamProfile.Keys.KeyLength, CSR_MAX_NUM_KEY);
 
+	qdf_mem_zero(pWextState->roamProfile.Keys.KeyMaterial,
+		     sizeof(pWextState->roamProfile.Keys.KeyMaterial));
+
 #ifdef FEATURE_WLAN_WAPI
 	pAdapter->wapi_info.wapiAuthMode = WAPI_AUTH_MODE_OPEN;
 	pAdapter->wapi_info.nWapiMode = 0;
@@ -5754,7 +5757,7 @@ static void hdd_get_station_statistics_cb(void *stats, void *context)
 	struct csr_per_chain_rssi_stats_info *per_chain_rssi_stats;
 
 	if (NULL == stats) {
-		hdd_err("Bad param, pStats [%p]", stats);
+		hdd_err("Bad param, pStats [%pK]", stats);
 		return;
 	}
 

@@ -629,6 +629,7 @@ static void msm_gpio_irq_enable(struct irq_data *d)
 static void msm_gpio_irq_unmask(struct irq_data *d)
 {
 	struct gpio_chip *gc = irq_data_get_irq_chip_data(d);
+	uint32_t irqtype = irqd_get_trigger_type(d);
 	struct msm_pinctrl *pctrl = gpiochip_get_data(gc);
 	const struct msm_pingroup *g;
 	unsigned long flags;
@@ -637,6 +638,12 @@ static void msm_gpio_irq_unmask(struct irq_data *d)
 	g = &pctrl->soc->groups[d->hwirq];
 
 	spin_lock_irqsave(&pctrl->lock, flags);
+
+	if (irqtype & (IRQF_TRIGGER_HIGH | IRQF_TRIGGER_LOW)) {
+		val = readl_relaxed(pctrl->regs + g->intr_status_reg);
+		val &= ~BIT(g->intr_status_bit);
+		writel_relaxed(val, pctrl->regs + g->intr_status_reg);
+	}
 
 	val = readl(pctrl->regs + g->intr_cfg_reg);
 	val |= BIT(g->intr_enable_bit);
@@ -1307,7 +1314,7 @@ static void add_dirconn_tlmm(struct irq_data *d, irq_hw_number_t irq)
 		pctrl = gpiochip_get_data(gc);
 		if (pctrl->spi_cfg_regs) {
 			spi_cfg_reg = pctrl->spi_cfg_regs +
-					(dir_conn_data->hwirq / 32) * 4;
+					((dir_conn_data->hwirq - 32) / 32) * 4;
 			if (spi_cfg_reg < pctrl->spi_cfg_end) {
 				spin_lock_irqsave(&pctrl->lock, flags);
 				val = scm_io_read(spi_cfg_reg);
@@ -1315,7 +1322,8 @@ static void add_dirconn_tlmm(struct irq_data *d, irq_hw_number_t irq)
 				 * Clear the respective bit for edge type
 				 * interrupt
 				 */
-				val &= ~(1 << (dir_conn_data->hwirq % 32));
+				val &= ~(1 << ((dir_conn_data->hwirq - 32)
+									% 32));
 				WARN_ON(scm_io_write(spi_cfg_reg, val));
 				spin_unlock_irqrestore(&pctrl->lock, flags);
 			} else
@@ -1392,13 +1400,13 @@ static int msm_dirconn_irq_set_type(struct irq_data *d, unsigned int type)
 
 	if (pctrl->spi_cfg_regs && type != IRQ_TYPE_NONE) {
 		spi_cfg_reg = pctrl->spi_cfg_regs +
-				(parent_data->hwirq / 32) * 4;
+				((parent_data->hwirq - 32) / 32) * 4;
 		if (spi_cfg_reg < pctrl->spi_cfg_end) {
 			spin_lock_irqsave(&pctrl->lock, flags);
 			val = scm_io_read(spi_cfg_reg);
-			val &= ~(1 << (parent_data->hwirq % 32));
+			val &= ~(1 << ((parent_data->hwirq - 32) % 32));
 			if (config_val)
-				val |= (1 << (parent_data->hwirq % 32));
+				val |= (1 << ((parent_data->hwirq - 32)  % 32));
 			WARN_ON(scm_io_write(spi_cfg_reg, val));
 			spin_unlock_irqrestore(&pctrl->lock, flags);
 		} else

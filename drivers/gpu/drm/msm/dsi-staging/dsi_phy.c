@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2016-2018, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2016-2019, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -866,6 +866,29 @@ error:
 	return rc;
 }
 
+/* update dsi phy timings for dynamic clk switch use case */
+int dsi_phy_update_phy_timings(struct msm_dsi_phy *phy,
+			       struct dsi_host_config *config)
+{
+	int rc = 0;
+
+	if (!phy || !config) {
+		pr_err("invalid argument\n");
+		return -EINVAL;
+	}
+
+	memcpy(&phy->mode, &config->video_timing, sizeof(phy->mode));
+	rc = phy->hw.ops.calculate_timing_params(&phy->hw, &phy->mode,
+						 &config->common_config,
+						 &phy->cfg.timing);
+	if (rc)
+		pr_err("failed to calculate phy timings %d\n", rc);
+	else
+		phy->cfg.is_phy_timing_present = true;
+
+	return rc;
+}
+
 int dsi_phy_lane_reset(struct msm_dsi_phy *phy)
 {
 	int ret = 0;
@@ -1023,6 +1046,9 @@ int dsi_phy_set_timing_params(struct msm_dsi_phy *phy,
 		pr_err("Invalid params\n");
 		return -EINVAL;
 	}
+
+	if (phy->cfg.is_phy_timing_present)
+		return rc;
 
 	mutex_lock(&phy->phy_lock);
 
