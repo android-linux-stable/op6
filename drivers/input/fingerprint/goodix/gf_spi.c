@@ -652,8 +652,36 @@ static ssize_t screen_state_get(struct device *device,
 
 static DEVICE_ATTR(screen_state, 0400, screen_state_get, NULL);
 
+#ifdef FP_PROXIMITY_ENABLE
+static ssize_t proximity_state_set(struct device *dev,
+	struct device_attribute *attribute, const char *buffer, size_t count)
+{
+	struct gf_dev *gf_dev = dev_get_drvdata(dev);
+	int rc, val;
+
+	rc = kstrtoint(buffer, 10, &val);
+	if (rc)
+		return -EINVAL;
+
+	gf_dev->proximity_state = !!val;
+
+	if (gf_dev->proximity_state) {
+		gf_disable_irq(gf_dev);
+	} else {
+		gf_enable_irq(gf_dev);
+	}
+
+	return count;
+}
+
+static DEVICE_ATTR(proximity_state, S_IWUSR, NULL, proximity_state_set);
+#endif
+
 static struct attribute *gf_attributes[] = {
 	&dev_attr_screen_state.attr,
+#ifdef FP_PROXIMITY_ENABLE
+        &dev_attr_proximity_state.attr,
+#endif
 	NULL
 };
 
@@ -833,6 +861,9 @@ static int gf_probe(struct platform_device *pdev)
 #endif
 {
 	struct gf_dev *gf_dev = &gf;
+#ifdef FP_PROXIMITY_ENABLE
+	struct device *dev = &pdev->dev;
+#endif
 	int status = -EINVAL;
 	unsigned long minor;
 	int i;
@@ -951,6 +982,9 @@ static int gf_probe(struct platform_device *pdev)
 	#else
 		platform_set_drvdata(pdev, gf_dev);
 	#endif
+#ifdef FP_PROXIMITY_ENABLE
+	dev_set_drvdata(dev, gf_dev);
+#endif
 	status = sysfs_create_group(&gf_dev->spi->dev.kobj,
 			&gf_attribute_group);
 	if (status) {
