@@ -320,7 +320,7 @@ struct channel_ctx {
 
 static struct glink_core_if core_impl;
 static void *log_ctx;
-static unsigned int glink_debug_mask = QCOM_GLINK_INFO;
+static unsigned int glink_debug_mask;
 module_param_named(debug_mask, glink_debug_mask,
 		   uint, S_IRUGO | S_IWUSR | S_IWGRP);
 
@@ -4006,9 +4006,9 @@ static int glink_core_init_xprt_qos_cfg(struct glink_core_xprt_ctx *xprt_ptr,
 	xprt_ptr->token_count = cfg->token_count ? cfg->token_count :
 					GLINK_QOS_DEF_NUM_TOKENS;
 
-	xprt_ptr->prio_bin = kzalloc(xprt_ptr->num_priority *
-				sizeof(struct glink_qos_priority_bin),
-				GFP_KERNEL);
+	xprt_ptr->prio_bin = kcalloc(xprt_ptr->num_priority,
+				     sizeof(struct glink_qos_priority_bin),
+				     GFP_KERNEL);
 	if (xprt_ptr->num_priority > 1)
 		sched_setscheduler(xprt_ptr->tx_task, SCHED_FIFO, &param);
 	if (!xprt_ptr->prio_bin) {

@@ -24,4 +24,8 @@ config FINGERPRINT_GOODIX
 config FINGERPRINT_SILEAD
 	tristate "silead fingerprint sensor support"
 	depends on SPI_MASTER
+config FP_PROXIMITY_ENABLE
+	tristate "fingerprint proximity sysfs support"
+	default y
+	depends on FINGERPRINT_GOODIX
 endif

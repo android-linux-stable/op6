@@ -277,7 +277,7 @@ dsi_samsung_dsc_cmd_display: qcom,dsi-display@22 {
 };
 
 &qupv3_se9_2uart {
-	compatible = "qcom,msm-geni-console-oem";
+	compatible = "qcom,msm-geni-console";
 };
 
 

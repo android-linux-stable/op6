@@ -25,6 +25,8 @@
 #define NUM_LNODES	3
 #define MAX_STR_CL	50
 
+#define DEBUG_REC_TRANSACTION 0
+
 struct bus_search_type {
 	struct list_head link;
 	struct list_head node_list;
@@ -125,9 +127,9 @@ static int gen_lnode(struct device *dev,
 	}
 
 	if (!cur_dev->num_lnodes) {
-		cur_dev->lnode_list = devm_kzalloc(dev,
-				sizeof(struct link_node) * NUM_LNODES,
-								GFP_KERNEL);
+		cur_dev->lnode_list = devm_kcalloc(dev,
+				NUM_LNODES, sizeof(struct link_node),
+				GFP_KERNEL);
 		if (!cur_dev->lnode_list)
 			goto exit_gen_lnode;
 
@@ -905,8 +907,9 @@ static int alloc_handle_lst(int size)
 	struct msm_bus_client **t_cl_list;
 
 	if (!handle_list.num_entries) {
-		t_cl_list = kzalloc(sizeof(struct msm_bus_client *)
-			* NUM_CL_HANDLES, GFP_KERNEL);
+		t_cl_list = kcalloc(NUM_CL_HANDLES,
+				    sizeof(struct msm_bus_client *),
+				    GFP_KERNEL);
 		if (ZERO_OR_NULL_PTR(t_cl_list)) {
 			ret = -ENOMEM;
 			MSM_BUS_ERR("%s: Failed to allocate handles list",
@@ -988,8 +991,9 @@ static uint32_t register_client_adhoc(struct msm_bus_scale_pdata *pdata)
 	}
 	client->src_pnode = lnode;
 
-	client->src_devs = kzalloc(pdata->usecase->num_paths *
-					sizeof(struct device *), GFP_KERNEL);
+	client->src_devs = kcalloc(pdata->usecase->num_paths,
+				   sizeof(struct device *),
+				   GFP_KERNEL);
 	if (IS_ERR_OR_NULL(client->src_devs)) {
 		MSM_BUS_ERR("%s: Error allocating pathnode ptr!", __func__);
 		goto exit_src_dev_malloc_fail;
@@ -1254,7 +1258,8 @@ static int update_bw_adhoc(struct msm_bus_client_handle *cl, u64 ab, u64 ib)
 	if (!strcmp(test_cl, cl->name))
 		log_transaction = true;
 
-	msm_bus_dbg_rec_transaction(cl, ab, ib);
+	if (DEBUG_REC_TRANSACTION)
+		msm_bus_dbg_rec_transaction(cl, ab, ib);
 
 	if ((cl->cur_act_ib == ib) && (cl->cur_act_ab == ab)) {
 		MSM_BUS_DBG("%s:no change in request", cl->name);
@@ -1315,7 +1320,9 @@ static int update_bw_context(struct msm_bus_client_handle *cl, u64 act_ab,
 
 	if (!slp_ab && !slp_ib)
 		cl->active_only = true;
-	msm_bus_dbg_rec_transaction(cl, cl->cur_act_ab, cl->cur_dual_ib);
+	if (DEBUG_REC_TRANSACTION)
+		msm_bus_dbg_rec_transaction(cl, cl->cur_act_ab,
+					    cl->cur_dual_ib);
 	ret = update_path(cl->mas_dev, cl->slv, act_ib, act_ab, slp_ib,
 				slp_ab, cl->cur_act_ab, cl->cur_act_ab,
 				cl->first_hop, cl->active_only);
