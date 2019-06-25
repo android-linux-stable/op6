@@ -167,7 +167,7 @@ struct gf_dev {
 	struct pinctrl_state   *gpio_state_disable;
 	signed enable_gpio;
 	int screen_state;
-#ifdef FP_PROXIMITY_ENABLE
+#if defined(CONFIG_FP_PROXIMITY_ENABLE)
 	struct notifier_block notifier;
 	int proximity_state; /* 0:far 1:near */
 #endif
