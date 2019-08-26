@@ -27,7 +27,7 @@
 #include "cam_isp_context.h"
 #include "cam_common_util.h"
 
-static const char isp_dev_name[] = "isp";
+static const char isp_dev_name[] = "cam-isp";
 
 #define INC_STATE_MONITOR_HEAD(head) \
 	(atomic64_add_return(1, head) % \
@@ -2541,6 +2541,8 @@ static int __cam_isp_ctx_release_dev_in_top_state(struct cam_context *ctx,
 	ctx_isp->reported_req_id = 0;
 	ctx_isp->hw_acquired = false;
 	ctx_isp->init_received = false;
+	ctx_isp->rdi_only_context = false;
+	ctx_isp->split_acquire = false;
 
 	/*
 	 * Ideally, we should never have any active request here.
@@ -2873,7 +2875,7 @@ get_dev_handle:
 	req_hdl_param.media_entity_flag = 0;
 	req_hdl_param.ops = ctx->crm_ctx_intf;
 	req_hdl_param.priv = ctx;
-
+	req_hdl_param.dev_id = CAM_ISP;
 	CAM_DBG(CAM_ISP, "get device handle form bridge");
 	ctx->dev_hdl = cam_create_device_hdl(&req_hdl_param);
 	if (ctx->dev_hdl <= 0) {

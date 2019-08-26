@@ -397,7 +397,7 @@ int cam_soc_util_set_clk_flags(struct cam_hw_soc_info *soc_info,
  * @return:             success or failure
  */
 int cam_soc_util_set_src_clk_rate(struct cam_hw_soc_info *soc_info,
-	int32_t clk_rate);
+	int64_t clk_rate);
 
 /**
  * cam_soc_util_get_option_clk_by_name()
@@ -637,6 +637,10 @@ void cam_soc_util_clk_disable_default(struct cam_hw_soc_info *soc_info);
 
 int cam_soc_util_clk_enable_default(struct cam_hw_soc_info *soc_info,
 	enum cam_vote_level clk_level);
+
+uint32_t cam_soc_util_get_vote_level(struct cam_hw_soc_info *soc_info,
+	uint64_t clock_rate);
+
 /**
  * cam_soc_util_get_soc_id()
  *
