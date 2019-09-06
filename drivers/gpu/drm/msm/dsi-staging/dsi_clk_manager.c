@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2016-2018, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2016-2019, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -1211,7 +1211,6 @@ int dsi_clk_req_state(void *client, enum dsi_clk_type clk,
 }
 
 int dsi_display_link_clk_force_update(void *client)
-
 {
 	int rc = 0;
 	struct dsi_clk_client_info *c = client;
