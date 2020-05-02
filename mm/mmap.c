@@ -45,17 +45,21 @@
 #include <linux/moduleparam.h>
 #include <linux/pkeys.h>
 #include <linux/oom.h>
+#include <linux/sched.h>
 
 #include <asm/uaccess.h>
 #include <asm/cacheflush.h>
 #include <asm/tlb.h>
 #include <asm/mmu_context.h>
+#include <linux/random.h>
 
 #include "internal.h"
 
 #ifndef arch_mmap_check
 #define arch_mmap_check(addr, len, flags)	(0)
 #endif
+
+#define SIZE_10M 0xA00000
 
 #ifdef CONFIG_HAVE_ARCH_MMAP_RND_BITS
 const int mmap_rnd_bits_min = CONFIG_ARCH_MMAP_RND_BITS_MIN;
@@ -1992,6 +1996,23 @@ unsigned long unmapped_area_topdown(struct vm_unmapped_area_info *info)
 	if (length < info->length)
 		return -ENOMEM;
 
+	if ((mm->va_feature & 0x2) && info->high_limit == mm->mmap_base) {
+		struct vm_unmapped_area_info info_b;
+		unsigned long addr;
+
+		switch (info->length) {
+		case 4096: case 8192: case 16384: case 32768:
+		case 65536: case 131072: case 262144:
+			info_b = *info;
+			info_b.high_limit = current->mm->va_feature_rnd - (SIZE_10M * (ilog2(info->length) - 12));
+			info_b.low_limit = current->mm->va_feature_rnd - (SIZE_10M * 7);
+			addr = unmapped_area_topdown(&info_b);
+			if (!offset_in_page(addr))
+				return addr;
+		default:
+			break;
+		}
+	}
 	/*
 	 * Adjust search limits by the desired length.
 	 * See implementation comment at top of unmapped_area().
@@ -2159,6 +2180,9 @@ arch_get_unmapped_area_topdown(struct file *filp, const unsigned long addr0,
 	info.flags = VM_UNMAPPED_AREA_TOPDOWN;
 	info.length = len;
 	info.low_limit = max(PAGE_SIZE, mmap_min_addr);
+	if (mm->va_feature & 0x1)
+		info.low_limit = max_t(unsigned long, 0x12c00000, info.low_limit);
+
 	info.high_limit = mm->mmap_base;
 	info.align_mask = 0;
 	addr = vm_unmapped_area(&info);
@@ -2174,6 +2198,14 @@ arch_get_unmapped_area_topdown(struct file *filp, const unsigned long addr0,
 		info.flags = 0;
 		info.low_limit = TASK_UNMAPPED_BASE;
 		info.high_limit = TASK_SIZE;
+		addr = vm_unmapped_area(&info);
+	}
+
+	if ((mm->va_feature & 0x1) && offset_in_page(addr)) {
+		VM_BUG_ON(addr != -ENOMEM);
+		info.flags = VM_UNMAPPED_AREA_TOPDOWN;
+		info.low_limit = max(PAGE_SIZE, mmap_min_addr);
+		info.high_limit = mm->mmap_base;
 		addr = vm_unmapped_area(&info);
 	}
 

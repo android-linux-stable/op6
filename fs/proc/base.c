@@ -3226,6 +3226,91 @@ static const struct file_operations proc_pid_memplus_type_operations = {
 };
 #endif
 
+
+#include <linux/random.h>
+static int va_feature = 0x7;
+module_param(va_feature, int, 0644);
+static ssize_t proc_va_feature_read(struct file *file, char __user *buf,
+		size_t count, loff_t *ppos)
+{
+	struct task_struct *task;
+	struct mm_struct *mm;
+	char buffer[32];
+	int ret;
+
+	if (!test_thread_flag(TIF_32BIT))
+		return -EINVAL;
+
+	task = get_proc_task(file_inode(file));
+	if (!task)
+		return -ESRCH;
+
+	ret = -EINVAL;
+	mm = get_task_mm(task);
+	if (mm) {
+		if (mm->va_feature & 0x4) {
+			ret = snprintf(buffer, sizeof(buffer), "%d\n",
+					(mm->zygoteheap_in_MB > 256) ? mm->zygoteheap_in_MB : 256);
+			if (ret > 0)
+				ret = simple_read_from_buffer(buf, count, ppos,
+						buffer, ret);
+		}
+		mmput(mm);
+	}
+
+	put_task_struct(task);
+
+	return ret;
+}
+
+static ssize_t proc_va_feature_write(struct file *file, const char __user *buf,
+		size_t count, loff_t *ppos)
+{
+	struct task_struct *task;
+	struct mm_struct *mm;
+	int ret;
+	unsigned int heapsize;
+
+	if (!test_thread_flag(TIF_32BIT))
+		return -ENOTTY;
+
+	task = get_proc_task(file_inode(file));
+	if (!task)
+		return -ESRCH;
+
+	ret = kstrtouint_from_user(buf, count, 0, &heapsize);
+	if (ret) {
+		put_task_struct(task);
+		return ret;
+	}
+
+	mm = get_task_mm(task);
+	if (mm) {
+		mm->va_feature = va_feature;
+
+		/* useless to print comm, always "main" */
+		if (mm->va_feature & 0x1) {
+			mm->va_feature_rnd = (0x4900000 + (get_random_long() % 0x1e00000)) & ~(0xffff);
+			special_arch_pick_mmap_layout(mm);
+		}
+
+		if ((mm->va_feature & 0x4) && (mm->zygoteheap_in_MB == 0))
+			mm->zygoteheap_in_MB = heapsize;
+
+		mmput(mm);
+	}
+
+	put_task_struct(task);
+
+	return count;
+}
+
+static const struct file_operations proc_va_feature_operations = {
+	.read           = proc_va_feature_read,
+	.write          = proc_va_feature_write,
+};
+
+
 /*
  * Thread groups
  */
@@ -3350,6 +3435,7 @@ static const struct pid_entry tgid_base_stuff[] = {
 #ifdef CONFIG_SMART_BOOST
 	REG("page_hot_count", 0666, proc_page_hot_count_operations),
 #endif
+	REG("va_feature", 0666, proc_va_feature_operations),
 };
 
 static int proc_tgid_base_readdir(struct file *file, struct dir_context *ctx)
